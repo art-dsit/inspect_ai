@@ -64,9 +64,17 @@ All changes are on the `pyodide-support` branch.
 
 | File | Purpose |
 |------|---------|
-| `_pyodide/demo.html` | Browser demo — loads Pyodide, installs deps, writes source to virtual FS, runs eval |
-| `_pyodide/serve.py` | Local dev server — serves demo.html and `/inspect_ai_source.json` (all .py files as JSON) |
+| `_pyodide/demo.html` | Browser demo — loads Pyodide, installs deps, writes source to virtual FS, runs popularity eval (100 samples), serializes log, and links to Inspect View |
+| `_pyodide/serve.py` | Threaded local dev server — serves demo.html, `/inspect_ai_source.json` (all .py + data files as JSON), `POST /save-log`, `/logs/*`, and `/view/*` (Inspect View UI assets) |
 | `_pyodide/test_pyodide.mjs` | Headless Node.js test — same flow as demo.html, no browser needed |
+
+### Inspect View integration
+
+After an eval completes, the demo serializes the eval log and POSTs it to the dev server. The server saves the JSON and returns a URL that opens the full Inspect View UI (`?log_file=` static-http mode). Key details:
+
+- **Log serialization** uses `_read_log_from_bytes()` (synchronous `zipfile`) to avoid `asyncio.run()` and thread-spawning failures in Pyodide's single-threaded Emscripten environment.
+- **LazyList avoidance:** code never accesses `EvalLog.samples` or `.reductions` directly, since `LazyList.__bool__`/`__len__`/`__iter__` all trigger `asyncio.run()`.
+- **ThreadingHTTPServer** ensures the browser can POST to `/save-log` while the page connection is still open.
 
 ### Verification
 
@@ -91,6 +99,8 @@ node test_pyodide.mjs
 cd src/inspect_ai/_pyodide
 python serve.py
 # Open http://localhost:8080 in Chrome
+# Click "Run Eval" — runs popularity (100 samples) with mockllm
+# After completion, click "View results in Inspect View" link
 ```
 
 ## Next steps
@@ -111,4 +121,4 @@ python serve.py
 
 - **WASM sandbox environment:** A lightweight sandbox that runs tool code in a separate WASM context, enabling tool use in browser evals.
 - **Persistent storage:** Use IndexedDB or the Origin Private File System for log persistence across browser sessions.
-- **Web UI integration:** Embed the eval runner in Inspect's existing View UI, allowing users to run and view evals from a single browser tab.
+- **Deeper View integration:** Currently the demo links out to Inspect View in a new tab via `?log_file=`. A tighter integration could embed the eval runner directly in the View UI.
