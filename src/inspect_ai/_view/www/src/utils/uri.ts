@@ -68,6 +68,7 @@ export const join = (file: string, dir?: string): string => {
  */
 export function encodePathParts(url: string): string {
   if (!url) return url; // Handle empty strings
+  if (url.startsWith("blob:")) return url;
 
   try {
     // Parse a full Uri

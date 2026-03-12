@@ -17,7 +17,6 @@ import json
 import mimetypes
 import os
 import sys
-import time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from pathlib import Path
@@ -26,8 +25,6 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent  # src/inspect_ai/
 DEMO_DIR = Path(__file__).resolve().parent  # src/inspect_ai/_pyodide/
 VIEW_DIST = PACKAGE_ROOT / "_view" / "www" / "dist"  # Inspect View built assets
-LOG_DIR = Path("/tmp/inspect_pyodide_logs")
-
 # Content-type map for view assets
 CONTENT_TYPES: dict[str, str] = {
     ".html": "text/html",
@@ -86,37 +83,8 @@ class DemoHandler(SimpleHTTPRequestHandler):
             self.wfile.write(data)
         elif self.path.startswith("/view/") or self.path == "/view":
             self._serve_view()
-        elif self.path.startswith("/logs/"):
-            self._serve_log()
         else:
             self.send_error(404)
-
-    def do_POST(self) -> None:
-        if self.path == "/save-log":
-            self._save_log()
-        else:
-            self.send_error(404)
-
-    def _save_log(self) -> None:
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_length)
-
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
-        filename = f"eval_{int(time.time() * 1000)}.json"
-        log_path = LOG_DIR / filename
-        log_path.write_bytes(body)
-
-        # Build view URL using the static-http API client
-        host = self.headers.get("Host", "localhost:8080")
-        view_url = f"http://{host}/view/?log_file=/logs/{filename}"
-
-        response = json.dumps({"view_url": view_url, "filename": filename}).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(response)))
-        self.end_headers()
-        self.wfile.write(response)
-        sys.stderr.write(f"[pyodide-demo] Saved log to {log_path}\n")
 
     def _serve_view(self) -> None:
         # Strip /view prefix to get the asset path
@@ -141,20 +109,6 @@ class DemoHandler(SimpleHTTPRequestHandler):
             return
 
         self.serve_file(file_path, content_type)
-
-    def _serve_log(self) -> None:
-        # /logs/eval_123.json -> serve from LOG_DIR
-        filename = self.path[len("/logs/") :].split("?")[0]
-        file_path = LOG_DIR / filename
-
-        # Prevent path traversal
-        try:
-            file_path.resolve().relative_to(LOG_DIR.resolve())
-        except ValueError:
-            self.send_error(403)
-            return
-
-        self.serve_file(file_path, "application/json")
 
     def serve_file(self, path: Path, content_type: str) -> None:
         try:
