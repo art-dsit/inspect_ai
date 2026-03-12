@@ -39,7 +39,9 @@ CONTENT_TYPES: dict[str, str] = {
 
 
 def collect_source_files() -> dict[str, str]:
-    """Collect all .py files under src/inspect_ai/ as {relative_path: content}."""
+    """Collect all .py and data files under src/inspect_ai/ as {relative_path: content}."""
+    # Extensions to include beyond .py (data files needed at runtime)
+    include_ext = {".py", ".jsonl", ".json", ".csv", ".txt"}
     files: dict[str, str] = {}
     for root, _dirs, filenames in os.walk(PACKAGE_ROOT):
         # Skip __pycache__, .egg-info, _pyodide itself (no need to ship the demo)
@@ -48,7 +50,7 @@ def collect_source_files() -> dict[str, str]:
         if any(part in skip or part.endswith(".egg-info") for part in rel_root.parts):
             continue
         for fname in filenames:
-            if not fname.endswith(".py"):
+            if not any(fname.endswith(ext) for ext in include_ext):
                 continue
             filepath = Path(root) / fname
             rel_path = filepath.relative_to(PACKAGE_ROOT.parent)
