@@ -64,17 +64,17 @@ All changes are on the `pyodide-support` branch.
 
 | File | Purpose |
 |------|---------|
-| `_pyodide/demo.html` | Browser demo — loads Pyodide, installs deps, writes source to virtual FS, runs popularity eval (100 samples), serializes log, and links to Inspect View |
-| `_pyodide/serve.py` | Threaded local dev server — serves demo.html, `/inspect_ai_source.json` (all .py + data files as JSON), `POST /save-log`, `/logs/*`, and `/view/*` (Inspect View UI assets) |
+| `_pyodide/demo.html` | Browser demo — loads Pyodide, installs deps, writes source to virtual FS, runs popularity eval (100 samples), serializes log, and displays results in an embedded Inspect View iframe via blob URL |
+| `_pyodide/serve.py` | Threaded local dev server — serves demo.html, `/inspect_ai_source.json` (all .py + data files as JSON), and `/view/*` (Inspect View UI assets) |
 | `_pyodide/test_pyodide.mjs` | Headless Node.js test — same flow as demo.html, no browser needed |
 
 ### Inspect View integration
 
-After an eval completes, the demo serializes the eval log and POSTs it to the dev server. The server saves the JSON and returns a URL that opens the full Inspect View UI (`?log_file=` static-http mode). Key details:
+After an eval completes, the demo serializes the eval log JSON and passes it directly to Inspect View via a blob URL — no server round-trip. The JSON is wrapped in a `Blob`, a `blob:` URL is created with `URL.createObjectURL()`, and the View is loaded in an inline iframe with `?log_file=<blob_url>`. The View's `fetch()` natively supports blob URLs. Key details:
 
 - **Log serialization** uses `_read_log_from_bytes()` (synchronous `zipfile`) to avoid `asyncio.run()` and thread-spawning failures in Pyodide's single-threaded Emscripten environment.
 - **LazyList avoidance:** code never accesses `EvalLog.samples` or `.reductions` directly, since `LazyList.__bool__`/`__len__`/`__iter__` all trigger `asyncio.run()`.
-- **ThreadingHTTPServer** ensures the browser can POST to `/save-log` while the page connection is still open.
+- **Blob URL handling:** `encodePathParts()` in `uri.ts` skips blob URLs to avoid mangling their opaque path structure.
 
 ### Verification
 
@@ -100,7 +100,7 @@ cd src/inspect_ai/_pyodide
 python serve.py
 # Open http://localhost:8080 in Chrome
 # Click "Run Eval" — runs popularity (100 samples) with mockllm
-# After completion, click "View results in Inspect View" link
+# After completion, Inspect View loads inline in an iframe
 ```
 
 ## Next steps
@@ -121,4 +121,4 @@ python serve.py
 
 - **WASM sandbox environment:** A lightweight sandbox that runs tool code in a separate WASM context, enabling tool use in browser evals.
 - **Persistent storage:** Use IndexedDB or the Origin Private File System for log persistence across browser sessions.
-- **Deeper View integration:** Currently the demo links out to Inspect View in a new tab via `?log_file=`. A tighter integration could embed the eval runner directly in the View UI.
+- **Deeper View integration:** The View is now embedded inline via iframe + blob URL. A tighter integration could embed the eval runner directly in the View UI.
