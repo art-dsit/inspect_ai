@@ -14,6 +14,10 @@
              background: #89b4fa; color: #1e1e2e; border: none; cursor: pointer;
              border-radius: 4px; margin-top: 1rem; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
+    a.view-link { display: inline-block; margin-top: 0.5rem; padding: 0.5rem 1.5rem;
+                  background: #a6e3a1; color: #1e1e2e; text-decoration: none;
+                  border-radius: 4px; font-weight: bold; }
+    a.view-link:hover { background: #94e2d5; }
   </style>
 </head>
 <body>
@@ -149,6 +153,41 @@ f"status={status}, scores={scores}"
         log('');
         log('=== RESULT ===', 'ok');
         log(result, 'ok');
+
+        // 6. Serialize the eval log and send to server for viewing
+        log('');
+        log('[6] Saving log for Inspect View…');
+        const logJson = await pyodide.runPythonAsync(`
+# eval_async() returns an EvalLog with lazy-loaded samples/reductions.
+# The lazy loader calls asyncio.run() or uses anyio threads — both fail
+# in Pyodide (no threads, already in event loop). Instead, re-read the
+# .eval zip file synchronously using _read_log_from_bytes (pure zipfile).
+from inspect_ai.log._recorders.eval import _read_log_from_bytes
+from inspect_ai.log._file import eval_log_json_str
+with open(results[0].location, "rb") as f:
+    log = _read_log_from_bytes(f, results[0].location, header_only=False)
+eval_log_json_str(log)
+        `);
+        const saveResp = await fetch('/save-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: logJson,
+        });
+        if (saveResp.ok) {
+          const { view_url } = await saveResp.json();
+          log('       Log saved.', 'ok');
+          log('');
+          const link = document.createElement('a');
+          link.href = view_url;
+          link.target = '_blank';
+          link.className = 'view-link';
+          link.textContent = 'View results in Inspect View \u2192';
+          statusEl.appendChild(link);
+          statusEl.appendChild(document.createTextNode('\n'));
+          log(`       ${view_url}`, 'ok');
+        } else {
+          log('       Failed to save log: ' + saveResp.status, 'err');
+        }
 
       } catch (e) {
         log('ERROR: ' + e.message, 'err');
