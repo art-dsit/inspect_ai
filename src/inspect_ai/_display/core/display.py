@@ -2,6 +2,7 @@ import contextlib
 from dataclasses import dataclass
 from types import TracebackType
 from typing import (
+    TYPE_CHECKING,
     Any,
     AsyncIterator,
     Callable,
@@ -14,14 +15,15 @@ from typing import (
     runtime_checkable,
 )
 
-import rich
 from pydantic import BaseModel, Field, field_validator
-from rich.console import Console
 
 from inspect_ai.log import EvalConfig, EvalResults, EvalStats
 from inspect_ai.model import GenerateConfig, ModelName
 
 from ...util._panel import InputPanel
+
+if TYPE_CHECKING:
+    from rich.console import Console
 
 
 @runtime_checkable
@@ -98,7 +100,9 @@ class TaskScreen(contextlib.AbstractContextManager["TaskScreen"]):
         header: str | None = None,
         transient: bool | None = None,
         width: int | None = None,
-    ) -> Iterator[Console]:
+    ) -> "Iterator[Console]":
+        import rich
+
         yield rich.get_console()
 
     async def input_panel(self, panel_type: type[TP]) -> TP:

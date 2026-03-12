@@ -8,7 +8,6 @@ from inspect_ai.util._sandbox.events import SandboxEnvironmentProxy
 from .._agent import Agent, AgentState, agent
 from .commands import human_agent_commands
 from .install import install_human_agent
-from .panel import HumanAgentPanel
 from .service import run_human_agent_service
 from .view import ConsoleView, HumanAgentView
 
@@ -86,6 +85,8 @@ def human_cli(
 
             # support both fullscreen ui and fallback
             if display_type() == "full":
+                from .panel import HumanAgentPanel
+
                 async with await input_panel(HumanAgentPanel) as panel:
                     return await run_human_agent(panel)
             else:

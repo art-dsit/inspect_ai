@@ -10,13 +10,23 @@ from inspect_ai._eval.score import score, score_async
 from inspect_ai._eval.task import Epochs, Task, TaskInfo, task_with
 from inspect_ai._eval.task.tasks import Tasks
 from inspect_ai._util.constants import PKG_NAME
-from inspect_ai._view.view import view
 from inspect_ai.agent._human.agent import human_cli
 from inspect_ai.log._metric import recompute_metrics
 from inspect_ai.log._score import edit_score
 from inspect_ai.solver._human_agent import human_agent
 
-__version__ = importlib_version(PKG_NAME)
+try:
+    __version__ = importlib_version(PKG_NAME)
+except Exception:
+    __version__ = "0.0.0.dev0"
+
+
+def __getattr__(name: str):  # type: ignore
+    if name == "view":
+        from inspect_ai._view.view import view
+
+        return view
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [

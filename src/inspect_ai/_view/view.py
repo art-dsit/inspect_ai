@@ -4,8 +4,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-import psutil
-
 from inspect_ai._display import display
 from inspect_ai._util.constants import (
     DEFAULT_SERVER_HOST,
@@ -85,6 +83,8 @@ def view_port_pid_file(app_dir: Path, port: int) -> Path:
 
 
 def view_acquire_port(app_dir: Path, port: int) -> None:
+    import psutil
+
     # pid file name
     pid_file = view_port_pid_file(app_dir, port)
 

@@ -2,8 +2,11 @@ import os
 
 if os.name == "posix":
     # This makes Rich console input better if imported, but
-    # raises a ModuleNotFound error on Windows, so posix only
-    import readline  # noqa: F401
+    # raises a ModuleNotFound error on Windows and Pyodide, so posix only
+    try:
+        import readline  # noqa: F401
+    except ModuleNotFoundError:
+        pass
 from contextlib import contextmanager
 from typing import Iterator
 

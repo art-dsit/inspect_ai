@@ -1,14 +1,8 @@
 import sys
 from contextvars import ContextVar
 
-import rich
-
 from inspect_ai.util._display import display_type
 
-from ..log.display import LogDisplay
-from ..plain.display import PlainDisplay
-from ..rich.display import RichDisplay
-from ..textual.display import TextualDisplay
 from .display import Display, TaskScreen
 
 _active_display: Display | None = None
@@ -22,17 +16,29 @@ def active_display() -> Display | None:
 def display() -> Display:
     global _active_display
     if _active_display is None:
-        if display_type() == "plain":
-            _active_display = PlainDisplay()
-        elif (
-            display_type() == "full"
-            and sys.stdout.isatty()
-            and not rich.get_console().is_jupyter
-        ):
-            _active_display = TextualDisplay()
-        elif display_type() == "log":
+        dtype = display_type()
+        if sys.platform == "emscripten" or dtype == "log":
+            from ..log.display import LogDisplay
+
             _active_display = LogDisplay()
+        elif dtype == "plain":
+            from ..plain.display import PlainDisplay
+
+            _active_display = PlainDisplay()
+        elif dtype == "full" and sys.stdout.isatty():
+            import rich
+
+            if not rich.get_console().is_jupyter:
+                from ..textual.display import TextualDisplay
+
+                _active_display = TextualDisplay()
+            else:
+                from ..rich.display import RichDisplay
+
+                _active_display = RichDisplay()
         else:
+            from ..rich.display import RichDisplay
+
             _active_display = RichDisplay()
 
     return _active_display

@@ -14,7 +14,11 @@ import fsspec  # type: ignore  # type: ignore
 from fsspec.core import split_protocol  # type: ignore  # type: ignore
 from fsspec.implementations.local import make_path_posix  # type: ignore
 from pydantic import BaseModel, Field
-from s3fs import S3FileSystem  # type: ignore
+
+try:
+    from s3fs import S3FileSystem  # type: ignore
+except ImportError:
+    S3FileSystem = None  # type: ignore
 from shortuuid import uuid
 
 from inspect_ai._util._async import configured_async_backend, current_async_backend
@@ -272,7 +276,7 @@ class FileSystem:
         return isinstance(self.fs, fsspec.asyn.AsyncFileSystem)
 
     def is_s3(self) -> bool:
-        return isinstance(self.fs, S3FileSystem)
+        return S3FileSystem is not None and isinstance(self.fs, S3FileSystem)
 
     def put_file(self, lpath: str, rpath: str) -> None:
         self.fs.put_file(lpath, rpath)

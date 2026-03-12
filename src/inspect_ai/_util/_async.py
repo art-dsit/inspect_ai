@@ -6,7 +6,11 @@ from logging import Logger
 from typing import Any, Awaitable, Callable, Coroutine, Iterable, Literal, TypeVar, cast
 
 import anyio
-import nest_asyncio2 as nest_asyncio  # type: ignore
+
+try:
+    import nest_asyncio2 as nest_asyncio  # type: ignore
+except ImportError:
+    nest_asyncio = None  # type: ignore
 import sniffio
 
 if sys.version_info >= (3, 11):
@@ -105,7 +109,8 @@ _initialised_nest_asyncio: bool = False
 def init_nest_asyncio() -> None:
     global _initialised_nest_asyncio
     if not _initialised_nest_asyncio:
-        nest_asyncio.apply()
+        if nest_asyncio is not None:
+            nest_asyncio.apply()
         _initialised_nest_asyncio = True
 
 

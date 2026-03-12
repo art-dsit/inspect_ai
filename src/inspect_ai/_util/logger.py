@@ -1,11 +1,13 @@
 import atexit
 import os
+import sys
 from logging import (
     INFO,
     NOTSET,
     WARNING,
     FileHandler,
     Formatter,
+    Handler,
     Logger,
     LogRecord,
     addLevelName,
@@ -15,10 +17,6 @@ from logging import (
 from pathlib import Path
 from typing import TypedDict
 
-import rich
-from rich.console import ConsoleRenderable
-from rich.logging import RichHandler
-from rich.text import Text
 from typing_extensions import override
 
 from .constants import (
@@ -41,74 +39,114 @@ from .trace import (
 
 TRACE_FILE_NAME = "trace.log"
 
+_USE_RICH = sys.platform != "emscripten"
 
-# log handler that filters messages to stderr and the log file
-class LogHandler(RichHandler):
-    def __init__(
-        self,
-        capture_levelno: int,
-        display_levelno: int,
-        transcript_levelno: int,
-        env_prefix: str = "INSPECT",
-        trace_dir: Path | None = None,
-    ) -> None:
-        super().__init__(capture_levelno, console=rich.get_console())
-        self.transcript_levelno = transcript_levelno
-        self.display_level = display_levelno
-        # log into an external file if requested via env var
-        file_logger = os.environ.get(f"{env_prefix}_PY_LOGGER_FILE", None)
-        self.file_logger = FileHandler(file_logger) if file_logger else None
-        if self.file_logger:
-            self.file_logger.setFormatter(
-                Formatter("%(asctime)s - %(levelname)s - %(message)s")
+
+if _USE_RICH:
+    import rich
+    from rich.console import ConsoleRenderable
+    from rich.logging import RichHandler
+    from rich.text import Text
+
+    # log handler that filters messages to stderr and the log file
+    class LogHandler(RichHandler):
+        def __init__(
+            self,
+            capture_levelno: int,
+            display_levelno: int,
+            transcript_levelno: int,
+            env_prefix: str = "INSPECT",
+            trace_dir: Path | None = None,
+        ) -> None:
+            super().__init__(capture_levelno, console=rich.get_console())
+            self.transcript_levelno = transcript_levelno
+            self.display_level = display_levelno
+            # log into an external file if requested via env var
+            file_logger = os.environ.get(f"{env_prefix}_PY_LOGGER_FILE", None)
+            self.file_logger = FileHandler(file_logger) if file_logger else None
+            if self.file_logger:
+                self.file_logger.setFormatter(
+                    Formatter("%(asctime)s - %(levelname)s - %(message)s")
+                )
+
+            # see if the user has a special log level for the file
+            file_logger_level = os.environ.get(f"{env_prefix}_PY_LOGGER_LEVEL", "")
+            if file_logger_level:
+                self.file_logger_level = int(getLevelName(file_logger_level.upper()))
+            else:
+                self.file_logger_level = 0
+
+            # add a trace file handler
+            rotate_trace_files(trace_dir)  # remove oldest if > 10 trace files
+            env_trace_file = os.environ.get(f"{env_prefix}_TRACE_FILE", None)
+            trace_file = (
+                Path(env_trace_file)
+                if env_trace_file
+                else inspect_trace_file(trace_dir)
             )
+            self.trace_logger = FileHandler(trace_file)
+            self.trace_logger.setFormatter(TraceFormatter())
+            atexit.register(compress_trace_log(self.trace_logger))
 
-        # see if the user has a special log level for the file
-        file_logger_level = os.environ.get(f"{env_prefix}_PY_LOGGER_LEVEL", "")
-        if file_logger_level:
-            self.file_logger_level = int(getLevelName(file_logger_level.upper()))
-        else:
+            # set trace level
+            trace_level = os.environ.get(f"{env_prefix}_TRACE_LEVEL", TRACE_LOG_LEVEL)
+            self.trace_logger_level = int(getLevelName(trace_level.upper()))
+
+        @override
+        def emit(self, record: LogRecord) -> None:
+            # write to stderr if we are at or above the threshold
+            if record.levelno >= self.display_level and self.display_level != NOTSET:
+                super().emit(record)
+
+            # write to file if the log file level matches. if the
+            # user hasn't explicitly specified a level then we
+            # take the minimum of 'info' and the display level
+            if self.file_logger and record.levelno >= (
+                self.file_logger_level or min(self.display_level, INFO)
+            ):
+                self.file_logger.emit(record)
+
+            # write to trace if the trace level matches.
+            if self.trace_logger and record.levelno >= self.trace_logger_level:
+                self.trace_logger.emit(record)
+
+            # eval log gets transcript level or higher
+            if record.levelno >= self.transcript_levelno:
+                log_to_transcript(record)
+
+        @override
+        def render_message(self, record: LogRecord, message: str) -> ConsoleRenderable:
+            return Text.from_ansi(message)
+
+else:
+
+    class LogHandler(Handler):  # type: ignore[no-redef]
+        """Lightweight log handler for environments without rich (e.g. Pyodide)."""
+
+        def __init__(
+            self,
+            capture_levelno: int,
+            display_levelno: int,
+            transcript_levelno: int,
+            env_prefix: str = "INSPECT",
+            trace_dir: Path | None = None,
+        ) -> None:
+            super().__init__(capture_levelno)
+            self.transcript_levelno = transcript_levelno
+            self.display_level = display_levelno
+            self.file_logger = None
             self.file_logger_level = 0
+            self.trace_logger = None
+            self.trace_logger_level = 0
 
-        # add a trace file handler
-        rotate_trace_files(trace_dir)  # remove oldest if > 10 trace files
-        env_trace_file = os.environ.get(f"{env_prefix}_TRACE_FILE", None)
-        trace_file = (
-            Path(env_trace_file) if env_trace_file else inspect_trace_file(trace_dir)
-        )
-        self.trace_logger = FileHandler(trace_file)
-        self.trace_logger.setFormatter(TraceFormatter())
-        atexit.register(compress_trace_log(self.trace_logger))
+        @override
+        def emit(self, record: LogRecord) -> None:
+            if record.levelno >= self.display_level and self.display_level != NOTSET:
+                msg = self.format(record)
+                print(msg, file=sys.stderr)
 
-        # set trace level
-        trace_level = os.environ.get(f"{env_prefix}_TRACE_LEVEL", TRACE_LOG_LEVEL)
-        self.trace_logger_level = int(getLevelName(trace_level.upper()))
-
-    @override
-    def emit(self, record: LogRecord) -> None:
-        # write to stderr if we are at or above the threshold
-        if record.levelno >= self.display_level and self.display_level != NOTSET:
-            super().emit(record)
-
-        # write to file if the log file level matches. if the
-        # user hasn't explicitly specified a level then we
-        # take the minimum of 'info' and the display level
-        if self.file_logger and record.levelno >= (
-            self.file_logger_level or min(self.display_level, INFO)
-        ):
-            self.file_logger.emit(record)
-
-        # write to trace if the trace level matches.
-        if self.trace_logger and record.levelno >= self.trace_logger_level:
-            self.trace_logger.emit(record)
-
-        # eval log gets transcript level or higher
-        if record.levelno >= self.transcript_levelno:
-            log_to_transcript(record)
-
-    @override
-    def render_message(self, record: LogRecord, message: str) -> ConsoleRenderable:
-        return Text.from_ansi(message)
+            if record.levelno >= self.transcript_levelno:
+                log_to_transcript(record)
 
 
 class LogHandlerVar(TypedDict):

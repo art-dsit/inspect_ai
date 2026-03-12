@@ -1,10 +1,22 @@
+import sys
 from typing import Any, Protocol, TypeVar
 
-from textual.containers import Container
 from typing_extensions import Self
 
+if sys.platform == "emscripten":
+    # textual is unavailable in Pyodide — provide a minimal stub base class
+    class _ContainerStub:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
 
-class InputPanel(Container):
+    _BaseClass: type = _ContainerStub
+else:
+    from textual.containers import Container
+
+    _BaseClass = Container
+
+
+class InputPanel(_BaseClass):  # type: ignore[misc]
     """Base class for for Inspect input panels."""
 
     DEFAULT_TITLE = "Panel"

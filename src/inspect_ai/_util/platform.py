@@ -68,3 +68,10 @@ def is_running_in_vscode() -> bool:
 
 def is_windows() -> bool:
     return os.name == "nt"
+
+
+def is_emscripten() -> bool:
+    """Check if running under Pyodide (CPython compiled to WebAssembly)."""
+    import sys
+
+    return sys.platform == "emscripten"

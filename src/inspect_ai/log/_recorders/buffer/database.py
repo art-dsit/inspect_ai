@@ -10,7 +10,10 @@ from pathlib import Path
 from sqlite3 import Connection, OperationalError
 from typing import Callable, Iterator, Literal
 
-import psutil
+try:
+    import psutil
+except ImportError:
+    psutil = None  # type: ignore
 from pydantic import BaseModel
 from shortuuid import uuid
 from typing_extensions import override
@@ -732,7 +735,7 @@ def cleanup_sample_buffer_databases(db_dir: Path | None = None) -> None:
                 _, pid_str, _ = db.name.rsplit(".", 2)
                 if pid_str.isdigit():
                     pid = int(pid_str)
-                    if not psutil.pid_exists(pid):
+                    if psutil is not None and not psutil.pid_exists(pid):
                         cleanup_sample_buffer_db(db)
     except Exception as ex:
         logger.warning(f"Error cleaning up sample buffer databases at {db_dir}: {ex}")

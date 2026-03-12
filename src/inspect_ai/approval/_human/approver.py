@@ -5,7 +5,6 @@ from .._approval import Approval, ApprovalDecision
 from .._approver import Approver
 from .._registry import approver
 from .console import console_approval
-from .panel import panel_approval
 
 
 @approver(name="human")
@@ -29,6 +28,8 @@ def human_approver(
     ) -> Approval:
         # try to use the panel approval (available in fullscreen display)
         try:
+            from .panel import panel_approval
+
             return await panel_approval(message, call, view, history, choices)
 
         # fallback to plain console approval (available in all displays)
