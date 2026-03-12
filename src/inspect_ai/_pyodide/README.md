@@ -1,0 +1,114 @@
+# Inspect AI in Pyodide
+
+Run Inspect AI evals in the browser via [Pyodide](https://pyodide.org/) (CPython compiled to WebAssembly).
+
+## Goal
+
+Prove the core eval loop works in-browser with `mockllm` — no sandbox, no tools, no real LLM API calls. This establishes a foundation for future work (WebLLM model provider, WASM sandbox, etc.).
+
+## Problem: import-time blockers
+
+When you do `import inspect_ai` in Pyodide, a chain of top-level imports fails because several dependencies are C extensions or platform-specific modules unavailable in Emscripten/WASM:
+
+| Blocker | Where used | Why it fails |
+|---------|-----------|-------------|
+| `nest_asyncio2` | `_util/_async.py` | C extension |
+| `rich` / `textual` | `_display/`, `_util/logger.py`, `_util/error.py` | `rich` is available in Pyodide but `textual` is not; both were eagerly imported |
+| `mmh3` | `_util/hash.py`, `model/_message_ids.py` | C extension |
+| `platformdirs` | `_util/appdirs.py` | Not available in Pyodide |
+| `psutil` | `_view/view.py`, `log/_recorders/buffer/database.py` | C extension |
+| `s3fs` / `boto3` / `aiobotocore` | `_util/file.py`, `_util/asyncfiles.py` | Not available in Pyodide |
+| `tiktoken` | `model/_tokens.py` | C extension |
+| `readline` | `util/_console.py` | Removed from Pyodide stdlib |
+| `zipfile_zstd` | `log/__init__.py` | Not available in Pyodide |
+| `aiohttp` | `_view/server.py` (via `_view/view.py`) | Not needed in browser |
+
+## Approach: conditional imports with fallbacks
+
+Add `try/except ImportError` guards or `sys.platform == "emscripten"` checks around each blocker, providing lightweight fallbacks. All changes are backward-compatible — native Python is unaffected.
+
+## Completed work
+
+All changes are on the `pyodide-support` branch.
+
+### Import guards (C extensions / unavailable modules)
+
+| File | Change |
+|------|--------|
+| `_util/_async.py` | `nest_asyncio2` → try/except; `init_nest_asyncio()` no-ops when unavailable |
+| `_util/hash.py` | `mmh3` → try/except; falls back to `hashlib.blake2s` |
+| `model/_message_ids.py` | `mmh3` → try/except; falls back to `hashlib.blake2s` |
+| `_util/appdirs.py` | `platformdirs` → gated on `sys.platform`; falls back to `/tmp`-based paths |
+| `_util/file.py` | `s3fs` → try/except |
+| `_util/asyncfiles.py` | `boto3`/`aiobotocore`/`botocore` → try/except; `TransferConfig` guarded |
+| `log/_recorders/buffer/database.py` | `psutil` → try/except |
+| `model/_tokens.py` | `tiktoken` → try/except; falls back to `len(text) // 4` estimate |
+| `util/_console.py` | `readline` → try/except (removed from Pyodide stdlib) |
+| `log/__init__.py` | `zipfile_zstd` → try/except |
+
+### Lazy imports (break eager import chains)
+
+| File | Change |
+|------|--------|
+| `_display/core/active.py` | All four display backends lazy-imported inside `display()` |
+| `_display/core/display.py` | `rich`/`Console` moved to `TYPE_CHECKING`; lazy import in `input_screen()` |
+| `_util/logger.py` | Split `LogHandler` into rich-based (normal) and stdlib-based (Emscripten) variants |
+| `util/_panel.py` | `textual.containers.Container` gated on `sys.platform`; stub base class for Emscripten |
+| `approval/_human/approver.py` | `panel_approval` import moved inside function body |
+| `agent/_human/agent.py` | `HumanAgentPanel` import moved inside function body |
+| `__init__.py` | `view` made lazy via `__getattr__`; `__version__` has fallback for missing metadata |
+| `_view/view.py` | `psutil` moved inside `view_acquire_port()` |
+| `_util/platform.py` | Added `is_emscripten()` utility |
+
+### Demo / test infrastructure
+
+| File | Purpose |
+|------|---------|
+| `_pyodide/demo.html` | Browser demo — loads Pyodide, installs deps, writes source to virtual FS, runs eval |
+| `_pyodide/serve.py` | Local dev server — serves demo.html and `/inspect_ai_source.json` (all .py files as JSON) |
+| `_pyodide/test_pyodide.mjs` | Headless Node.js test — same flow as demo.html, no browser needed |
+
+### Verification
+
+- **Pyodide (Node.js):** `node test_pyodide.mjs` → `status=success` in ~12s
+- **Native Python:** `pytest tests/model/test_mock_model_llm.py` → 9/9 passed, 0 regressions
+- **Lint:** `ruff check` clean
+- **Format:** `ruff format` clean
+
+## How to test
+
+### Headless (Node.js)
+
+```bash
+cd src/inspect_ai/_pyodide
+npm install pyodide@0.27.5
+node test_pyodide.mjs
+```
+
+### Browser
+
+```bash
+cd src/inspect_ai/_pyodide
+python serve.py
+# Open http://localhost:8080 in Chrome
+```
+
+## Next steps
+
+### Short-term
+
+- **More test coverage:** Run a broader set of pytest suites natively to catch regressions in less-common code paths (e.g. scoring, solvers, dataset loading).
+- **Pyodide CI:** Add a GitHub Actions job that runs `test_pyodide.mjs` to catch future import breakage.
+- **Clean up demo deps:** Audit which micropip packages are actually needed vs. transitively pulled. Consider generating the dep list from pyproject.toml.
+
+### Medium-term
+
+- **WebLLM model provider:** Add a model provider that uses [WebLLM](https://webllm.mlc.ai/) to run small LLMs entirely in the browser via WebGPU. This would allow real (not mocked) evals without any server.
+- **Build a proper wheel:** Instead of writing raw .py files to the virtual FS, build a pure-Python `.whl` (excluding C extensions) that micropip can install directly.
+- **Handle more import paths:** Some features (sandboxes, MCP tools, Docker) will hit additional blockers if invoked. Guard or stub them as needed.
+
+### Long-term
+
+- **WASM sandbox environment:** A lightweight sandbox that runs tool code in a separate WASM context, enabling tool use in browser evals.
+- **Persistent storage:** Use IndexedDB or the Origin Private File System for log persistence across browser sessions.
+- **Web UI integration:** Embed the eval runner in Inspect's existing View UI, allowing users to run and view evals from a single browser tab.
