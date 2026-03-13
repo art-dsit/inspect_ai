@@ -67,6 +67,7 @@ All changes are on the `pyodide-support` branch.
 | `_pyodide/demo.html` | Browser demo — loads Pyodide, installs deps, writes source to virtual FS, runs popularity eval (100 samples), serializes log, and displays results in an embedded Inspect View iframe via blob URL |
 | `_pyodide/serve.py` | Threaded local dev server — serves demo.html, `/inspect_ai_source.json` (all .py + data files as JSON), and `/view/*` (Inspect View UI assets) |
 | `_pyodide/test_pyodide.mjs` | Headless Node.js test — same flow as demo.html, no browser needed |
+| `_pyodide/screenshot.py` | Headless Playwright screenshot utility — starts serve.py, opens demo in headless Chromium, optionally runs eval, saves screenshot. Designed for AI agent iteration loops (see "How to test" below) |
 
 ### Inspect View integration
 
@@ -75,6 +76,7 @@ After an eval completes, the demo serializes the eval log JSON and passes it dir
 - **Log serialization** uses `_read_log_from_bytes()` (synchronous `zipfile`) to avoid `asyncio.run()` and thread-spawning failures in Pyodide's single-threaded Emscripten environment.
 - **LazyList avoidance:** code never accesses `EvalLog.samples` or `.reductions` directly, since `LazyList.__bool__`/`__len__`/`__iter__` all trigger `asyncio.run()`.
 - **Blob URL handling:** `encodePathParts()` in `uri.ts` skips blob URLs to avoid mangling their opaque path structure.
+- **Single-file mode navigation fix:** In the View's single-file mode (used by the iframe), the home icon is hidden (no meaningful destination), `LogViewContainer` skips its `unloadLog` cleanup on unmount (the blob-loaded log must stay in the store), and `LogSampleDetailView` navigates to the hash root `/` instead of `logsUrl()` (which would produce a mangled blob URL route). This lets users click into a sample and back out without errors.
 
 ### Verification
 
@@ -93,7 +95,7 @@ npm install pyodide@0.27.5
 node test_pyodide.mjs
 ```
 
-### Browser
+### Browser (manual)
 
 ```bash
 cd src/inspect_ai/_pyodide
@@ -102,6 +104,47 @@ python serve.py
 # Click "Run Eval" — runs popularity (100 samples) with mockllm
 # After completion, Inspect View loads inline in an iframe
 ```
+
+### Headless browser (Playwright — for AI agents)
+
+`screenshot.py` launches serve.py, opens the demo in headless Chromium via [Playwright](https://playwright.dev/python/), optionally runs the eval, and saves a full-page screenshot. This lets AI coding agents (Claude Code, etc.) iterate on the demo visually without a real browser window.
+
+**One-time setup:**
+
+```bash
+pip install playwright            # Python bindings
+playwright install chromium       # Download headless Chromium
+playwright install-deps chromium  # System libraries (needs sudo/root)
+```
+
+**Usage:**
+
+```bash
+cd src/inspect_ai/_pyodide
+
+# Screenshot the landing page only (fast, ~3 s)
+python screenshot.py -o /tmp/landing.png
+
+# Run the eval and screenshot the result with Inspect View (~2 min)
+python screenshot.py --wait-for-eval -o /tmp/result.png
+
+# High-resolution (2x) with browser console output
+python screenshot.py --wait-for-eval --scale 2 --console-log -o /tmp/hires.png
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--wait-for-eval` | off | Click "Run Eval" and wait for Inspect View iframe |
+| `-o` / `--output` | `screenshot.png` | Output path |
+| `--timeout` | 300 | Max seconds to wait for eval |
+| `--width` | 1280 | Viewport width |
+| `--height` | 900 | Viewport height |
+| `--scale` | 1.0 | Device scale factor (2.0 for retina-like) |
+| `--console-log` | off | Print browser console messages to stdout |
+
+**Typical agent workflow:** make a change to `demo.html` or View code, rebuild the View (`cd _view/www && npx yarn build`), run `screenshot.py --wait-for-eval`, then read the screenshot to verify the result. The iframe content (Inspect View) can also be inspected programmatically via `page.evaluate()` on the iframe's `contentDocument` (same-origin).
 
 ## Next steps
 
