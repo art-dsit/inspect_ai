@@ -23,6 +23,7 @@ export const Navbar: FC<NavbarProps> = ({
   currentPath,
   breadcrumbsEnabled,
 }) => {
+  const singleFileMode = useStore((state) => state.app.singleFileMode);
   const logDir = useStore((state) => state.logs.logDir);
   const baseLogDir = dirname(logDir || "");
   const baseLogName = basename(logDir || "");
@@ -73,12 +74,14 @@ export const Navbar: FC<NavbarProps> = ({
         <Link to={backUrl} className={clsx(styles.toolbarButton)}>
           <i className={clsx(ApplicationIcons.navbar.back)} />
         </Link>
-        <Link
-          to={fnNavigationUrl("", logDir)}
-          className={clsx(styles.toolbarButton)}
-        >
-          <i className={clsx(ApplicationIcons.navbar.home)} />
-        </Link>
+        {!singleFileMode && (
+          <Link
+            to={fnNavigationUrl("", logDir)}
+            className={clsx(styles.toolbarButton)}
+          >
+            <i className={clsx(ApplicationIcons.navbar.home)} />
+          </Link>
+        )}
         {breadcrumbsEnabled !== false && (
           <div className={clsx(styles.pathContainer)} ref={pathContainerRef}>
             {logDir ? (

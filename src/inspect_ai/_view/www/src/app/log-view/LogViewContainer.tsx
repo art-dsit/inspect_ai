@@ -44,12 +44,19 @@ export const LogViewContainer: FC = () => {
   // Unload the log when this is mounted. This prevents the old log
   // data from being displayed when navigating back to the logs panel
   // and also ensures that we reload logs when freshly navigating to them.
+  // In single-file mode (e.g. Pyodide iframe with blob URL), skip the
+  // unload — the log was loaded once and must stay in the store since
+  // it can't be re-fetched from route params.
+  const singleFileMode = useStore((state) => state.app.singleFileMode);
   const { unloadLog } = useUnloadLog();
   useEffect(() => {
+    if (singleFileMode) {
+      return;
+    }
     return () => {
       unloadLog();
     };
-  }, [unloadLog]);
+  }, [unloadLog, singleFileMode]);
 
   useEffect(() => {
     // Redirect to an id/epoch url if a sampleUuid is provided

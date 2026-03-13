@@ -67,14 +67,20 @@ export const LogSampleDetailView: FC = () => {
   useEffect(() => {
     const loadLogAndSample = async () => {
       if (routeLogPath && routeSampleId && routeEpoch) {
-        // Initialize log directory if needed
-        await initLogDir();
+        // In single-file mode (e.g. Pyodide iframe with blob URL), the log
+        // is already loaded via the query param. Don't overwrite
+        // selectedLogFile with the route-parsed path (which mangles blob
+        // URLs by collapsing double slashes). Just select the sample.
+        if (!singleFileMode) {
+          // Initialize log directory if needed
+          await initLogDir();
 
-        // Set the selected log file
-        setSelectedLogFile(routeLogPath);
+          // Set the selected log file
+          setSelectedLogFile(routeLogPath);
 
-        // Sync logs to ensure we have the latest data
-        void syncLogs();
+          // Sync logs to ensure we have the latest data
+          void syncLogs();
+        }
 
         // Select the sample
         const targetEpoch = parseInt(routeEpoch, 10);
@@ -82,7 +88,11 @@ export const LogSampleDetailView: FC = () => {
           return;
         }
 
-        selectSample(routeSampleId, targetEpoch, routeLogPath);
+        selectSample(
+          routeSampleId,
+          targetEpoch,
+          singleFileMode ? selectedLogFile || routeLogPath : routeLogPath,
+        );
       }
     };
 
@@ -95,6 +105,8 @@ export const LogSampleDetailView: FC = () => {
     setSelectedLogFile,
     syncLogs,
     selectSample,
+    singleFileMode,
+    selectedLogFile,
   ]);
 
   // Handle UUID routes by redirecting to id/epoch URL
@@ -130,6 +142,13 @@ export const LogSampleDetailView: FC = () => {
   // - Parent folder breadcrumbs: go to those folders
   const fnNavigationUrl = useCallback(
     (file: string, log_dir?: string) => {
+      // In single-file mode (e.g. Pyodide iframe with blob URL), all navigation
+      // goes to the hash root. The log data stays in the store and AppLayout
+      // renders LogViewContainer directly — no re-fetch needed.
+      if (singleFileMode) {
+        return "/";
+      }
+
       if (!logPath || !file) {
         // Empty file = home button, go to root
         return logsUrl(file, log_dir);
@@ -150,7 +169,7 @@ export const LogSampleDetailView: FC = () => {
       // Otherwise, use the default logsUrl behavior (for parent folders)
       return logsUrl(file, log_dir);
     },
-    [logPath],
+    [logPath, singleFileMode],
   );
 
   return (
