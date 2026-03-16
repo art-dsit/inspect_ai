@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Inspect AI — WebLLM Eval Demo</title>
+  <style>
+    body { font-family: monospace; margin: 2rem; background: #1e1e2e; color: #cdd6f4; }
+    h1 { color: #89b4fa; }
+    #status { white-space: pre-wrap; margin-top: 1rem; max-height: 80vh; overflow-y: auto; }
+    .ok  { color: #a6e3a1; }
+    .err { color: #f38ba8; }
+    .info { color: #94e2d5; }
+    .warn { color: #f9e2af; }
+    label { display: block; margin-top: 1rem; }
+    select { font-family: monospace; font-size: 1rem; padding: 0.3rem;
+             background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; }
+    button { font-family: monospace; font-size: 1rem; padding: 0.5rem 1.5rem;
+             background: #89b4fa; color: #1e1e2e; border: none; cursor: pointer;
+             border-radius: 4px; margin-top: 1rem; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #view-frame { display: none; width: 100%; height: 80vh; border: 1px solid #45475a;
+                  border-radius: 4px; margin-top: 1rem; }
+    #progress-bar { width: 100%; height: 6px; background: #313244; border-radius: 3px;
+                    margin-top: 0.5rem; display: none; }
+    #progress-fill { height: 100%; background: #89b4fa; border-radius: 3px; width: 0%;
+                     transition: width 0.3s; }
+  </style>
+</head>
+<body>
+  <h1>Inspect AI + WebLLM — Real LLM in the Browser</h1>
+  <p>Runs the <strong>popularity</strong> eval using a <strong>real LLM</strong> via
+     <a href="https://github.com/mlc-ai/web-llm" style="color:#89b4fa">WebLLM</a> (WebGPU).
+     No server, no API keys — the model runs entirely in your browser.</p>
+  <p><em>Requires a browser with WebGPU support (Chrome 113+, Edge 113+).</em></p>
+
+  <label for="model-select">Model:
+    <select id="model-select">
+      <option value="SmolLM2-360M-Instruct-q4f32_1-MLC">SmolLM2-360M-Instruct (q4f32) — ~580 MB (default, no shader-f16 needed)</option>
+      <option value="SmolLM2-135M-Instruct-q0f16-MLC">SmolLM2-135M-Instruct (q0f16) — ~360 MB (needs shader-f16)</option>
+      <option value="SmolLM2-360M-Instruct-q4f16_1-MLC">SmolLM2-360M-Instruct (q4f16) — ~376 MB (needs shader-f16)</option>
+      <option value="SmolLM2-1.7B-Instruct-q4f16_1-MLC">SmolLM2-1.7B-Instruct (q4f16) — ~1.7 GB</option>
+      <option value="TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC">TinyLlama-1.1B-Chat (q4f32) — ~840 MB</option>
+      <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC">Qwen2.5-0.5B-Instruct (q4f16)</option>
+      <option value="Phi-3.5-mini-instruct-q4f16_1-MLC">Phi-3.5-mini-instruct (q4f16) — ~2.3 GB</option>
+    </select>
+  </label>
+
+  <label for="sample-limit">Samples:
+    <select id="sample-limit">
+      <option value="5">5 (quick test)</option>
+      <option value="10" selected>10</option>
+      <option value="25">25</option>
+      <option value="50">50</option>
+      <option value="100">100 (full dataset)</option>
+    </select>
+  </label>
+
+  <button id="run" onclick="runWebLLMDemo()">Run Eval with WebLLM</button>
+  <div id="progress-bar"><div id="progress-fill"></div></div>
+  <div id="status"></div>
+  <iframe id="view-frame"></iframe>
+
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.27.5/full/pyodide.js"></script>
+  <script type="module">
+    import * as webllm from "https://esm.run/@mlc-ai/web-llm";
+
+    const statusEl = document.getElementById('status');
+    const runBtn   = document.getElementById('run');
+    const progressBar  = document.getElementById('progress-bar');
+    const progressFill = document.getElementById('progress-fill');
+
+    let engine = null;
+
+    function log(msg, cls = 'info') {
+      const span = document.createElement('span');
+      span.className = cls;
+      span.textContent = msg + '\n';
+      statusEl.appendChild(span);
+      statusEl.scrollTop = statusEl.scrollHeight;
+    }
+
+    function setProgress(pct) {
+      progressBar.style.display = 'block';
+      progressFill.style.width = pct + '%';
+    }
+
+    /**
+     * Write a dict of {relative_path: content} into Pyodide's virtual FS
+     * under site-packages/.
+     */
+    function writeSourceToFS(pyodide, sourceFiles) {
+      const FS = pyodide.FS;
+      function ensureDir(path) {
+        const parts = path.split('/').filter(Boolean);
+        let current = '';
+        for (const part of parts) {
+          current += '/' + part;
+          try { FS.stat(current); } catch { try { FS.mkdir(current); } catch {} }
+        }
+      }
+
+      const sitePkgPath = pyodide.runPython(`
+import site, sys
+paths = site.getsitepackages()
+paths[0] if paths else sys.prefix + '/lib/python' + '.'.join(map(str, sys.version_info[:2])) + '/site-packages'
+      `);
+
+      let count = 0;
+      for (const [relPath, content] of Object.entries(sourceFiles)) {
+        const fullPath = sitePkgPath + '/' + relPath;
+        const dir = fullPath.substring(0, fullPath.lastIndexOf('/'));
+        ensureDir(dir);
+        FS.writeFile(fullPath, content);
+        count++;
+      }
+      return { count, sitePkgPath };
+    }
+
+    /**
+     * Bridge function: called from Python (Pyodide) to generate text via WebLLM.
+     * Accepts a JSON string with {messages, temperature, max_tokens}.
+     * Returns a JSON string with {content, usage: {prompt_tokens, completion_tokens}}.
+     */
+    async function webllmGenerate(requestJson) {
+      if (!engine) throw new Error("WebLLM engine not initialised");
+      const req = JSON.parse(requestJson);
+
+      const params = { messages: req.messages };
+      if (req.temperature != null) params.temperature = req.temperature;
+      if (req.max_tokens != null) params.max_tokens = req.max_tokens;
+
+      const reply = await engine.chat.completions.create(params);
+
+      const choice = reply.choices[0];
+      const content = choice?.message?.content || "";
+      const usage = reply.usage || {};
+
+      return JSON.stringify({
+        content: content,
+        usage: {
+          prompt_tokens: usage.prompt_tokens || 0,
+          completion_tokens: usage.completion_tokens || 0,
+        }
+      });
+    }
+
+    // Expose to global scope so Pyodide's `js.webllmGenerate` can find it
+    window.webllmGenerate = webllmGenerate;
+
+    async function runWebLLMDemo() {
+      runBtn.disabled = true;
+      statusEl.innerHTML = '';
+
+      const modelId = document.getElementById('model-select').value;
+      const sampleLimit = document.getElementById('sample-limit').value;
+
+      try {
+        // 1. Check WebGPU
+        if (!navigator.gpu) {
+          log('ERROR: WebGPU is not available in this browser.', 'err');
+          log('Try Chrome 113+ or Edge 113+.', 'err');
+          return;
+        }
+        log('[1/8] WebGPU available.', 'ok');
+
+        // 2. Load WebLLM model
+        log(`[2/8] Loading WebLLM model: ${modelId}…`);
+        log('       (First load downloads model weights — subsequent loads use cache)', 'warn');
+        setProgress(0);
+
+        engine = await webllm.CreateMLCEngine(modelId, {
+          initProgressCallback: (report) => {
+            const pct = Math.round((report.progress || 0) * 100);
+            setProgress(pct);
+            // Update last status line
+            const lines = statusEl.querySelectorAll('span.info');
+            const last = lines[lines.length - 1];
+            if (last && last.textContent.startsWith('       ↳')) {
+              last.textContent = `       ↳ ${report.text}\n`;
+            } else {
+              log(`       ↳ ${report.text}`);
+            }
+          }
+        });
+
+        setProgress(100);
+        log('       Model loaded.', 'ok');
+
+        // Quick smoke test
+        log('[3/8] Smoke-testing WebLLM…');
+        const testResult = await webllmGenerate(JSON.stringify({
+          messages: [{ role: "user", content: "Say hello in one word." }],
+        }));
+        const testParsed = JSON.parse(testResult);
+        log(`       Response: "${testParsed.content.trim()}"`, 'ok');
+
+        // 4. Load Pyodide
+        log('[4/8] Loading Pyodide…');
+        const pyodide = await loadPyodide();
+        log('       Pyodide loaded.', 'ok');
+
+        // 5. Install dependencies
+        log('[5/8] Installing Python dependencies…');
+        const depsResp = await fetch('/deps.json');
+        if (!depsResp.ok) throw new Error(`Failed to fetch deps.json: ${depsResp.status}`);
+        const deps = await depsResp.json();
+        await pyodide.loadPackage(deps.pyodide_builtins);
+        const micropip = pyodide.pyimport('micropip');
+        await micropip.install(deps.micropip);
+        log('       Dependencies installed.', 'ok');
+
+        // 6. Fetch and write inspect_ai source
+        log('[6/8] Loading inspect_ai source…');
+        const resp = await fetch('/inspect_ai_source.json');
+        if (!resp.ok) throw new Error(`Failed to fetch source: ${resp.status}`);
+        const sourceFiles = await resp.json();
+        const { count, sitePkgPath } = writeSourceToFS(pyodide, sourceFiles);
+        log(`       Wrote ${count} files.`, 'ok');
+
+        // Create dist-info
+        pyodide.runPython(`
+import os
+dist_info = "${sitePkgPath}/inspect_ai-0.0.0.dev0.dist-info"
+os.makedirs(dist_info, exist_ok=True)
+with open(os.path.join(dist_info, "METADATA"), "w") as f:
+    f.write("Metadata-Version: 2.1\\nName: inspect_ai\\nVersion: 0.0.0.dev0\\n")
+with open(os.path.join(dist_info, "RECORD"), "w") as f:
+    f.write("")
+        `);
+
+        // 7. Install shims
+        log('[7/8] Installing Pyodide shims…');
+        pyodide.runPython(`
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location(
+    "inspect_ai._pyodide.shims",
+    "${sitePkgPath}/inspect_ai/_pyodide/shims.py",
+)
+mod = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = mod
+spec.loader.exec_module(mod)
+        `);
+        log('       Shims installed.', 'ok');
+
+        // 8. Run eval with WebLLM
+        log(`[8/8] Running popularity eval (${sampleLimit} samples) with WebLLM (${modelId})…`);
+        log('       This will make real LLM calls in your browser!', 'warn');
+
+        const result = await pyodide.runPythonAsync(`
+import os
+os.environ["INSPECT_LOG_DIR"] = "/tmp/inspect_logs"
+os.environ["INSPECT_DISPLAY"] = "none"
+os.environ.setdefault("INSPECT_LOG_LEVEL", "warning")
+
+from inspect_ai import Task, eval_async
+from inspect_ai.dataset import FieldSpec, example_dataset
+from inspect_ai.scorer import match
+from inspect_ai.solver import generate, system_message
+
+SYSTEM_MESSAGE = r"""
+Please note: In the following EXERCISE, it is important that you only respond with exactly "Yes" or "No"
+"""
+
+dataset = example_dataset(
+    name="popularity",
+    sample_fields=FieldSpec(
+        input="question",
+        target="answer_matching_behavior",
+        metadata=["label_confidence"],
+    ),
+)
+
+task = Task(
+    dataset=dataset,
+    solver=[system_message(SYSTEM_MESSAGE), generate()],
+    scorer=[match()],
+)
+
+results = await eval_async(
+    task,
+    model="webllm/${modelId}",
+    display="none",
+    limit=${sampleLimit},
+)
+r = results[0]
+status = r.status
+scores = str(r.results.scores) if r.results else "None"
+f"status={status}, scores={scores}"
+        `);
+
+        log('');
+        log('=== RESULT ===', 'ok');
+        log(result, 'ok');
+
+        // Serialize log and show in Inspect View
+        log('');
+        log('[9] Preparing log for Inspect View…');
+        const logJson = await pyodide.runPythonAsync(`
+from inspect_ai.log._recorders.eval import _read_log_from_bytes
+from inspect_ai.log._file import eval_log_json_str
+with open(results[0].location, "rb") as f:
+    log = _read_log_from_bytes(f, results[0].location, header_only=False)
+eval_log_json_str(log)
+        `);
+        const blob = new Blob([logJson], { type: 'application/json' });
+        const blobUrl = URL.createObjectURL(blob);
+        const viewUrl = `/view/?log_file=${encodeURIComponent(blobUrl)}`;
+        log('       Ready.', 'ok');
+        log('');
+
+        const iframe = document.getElementById('view-frame');
+        iframe.src = viewUrl;
+        iframe.style.display = 'block';
+
+      } catch (e) {
+        log('ERROR: ' + e.message, 'err');
+        log('', 'err');
+        log('Stack trace:', 'err');
+        log(e.stack || '(no stack)', 'err');
+        console.error(e);
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    // Expose to global scope for the onclick handler
+    window.runWebLLMDemo = runWebLLMDemo;
+  </script>
+</body>
+</html>

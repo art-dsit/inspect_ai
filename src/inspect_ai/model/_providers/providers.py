@@ -302,6 +302,13 @@ def nnterp() -> type[ModelAPI]:
     return NNterpAPI
 
 
+@modelapi(name="webllm")
+def webllm() -> type[ModelAPI]:
+    from .webllm import WebLLMAPI
+
+    return WebLLMAPI
+
+
 @modelapi(name="none")
 def none() -> type[ModelAPI]:
     from .none import NoModel

@@ -74,6 +74,8 @@ class DemoHandler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/" or self.path == "/demo.html":
             self.serve_file(DEMO_DIR / "demo.html", "text/html")
+        elif self.path == "/webllm" or self.path == "/demo_webllm.html":
+            self.serve_file(DEMO_DIR / "demo_webllm.html", "text/html")
         elif self.path == "/deps.json":
             self.serve_file(DEPS_JSON, "application/json")
         elif self.path == "/inspect_ai_source.json":
