@@ -23,67 +23,87 @@ When you do `import inspect_ai` in Pyodide, a chain of top-level imports fails b
 | `zipfile_zstd` | `log/__init__.py` | Not available in Pyodide |
 | `aiohttp` | `_view/server.py` (via `_view/view.py`) | Not needed in browser |
 
-## Approach: conditional imports with fallbacks
+## Architecture: stub modules + lazy imports
 
-Add `try/except ImportError` guards or `sys.platform == "emscripten"` checks around each blocker, providing lightweight fallbacks. All changes are backward-compatible — native Python is unaffected.
+Instead of scattering `try/except ImportError` guards and `sys.platform == "emscripten"` checks throughout the production codebase, Pyodide support uses a two-part approach:
 
-## Completed work
+### 1. Shim layer (`shims.py`)
 
-All changes are on the `pyodide-support` branch.
+A single file (`_pyodide/shims.py`) that pre-populates `sys.modules` with lightweight stubs for every unavailable dependency **before** `import inspect_ai` runs. When production code does `import mmh3`, it gets the stub transparently — no code changes needed.
 
-### Import guards (C extensions / unavailable modules)
+Stubbed modules and their behavior:
+
+| Module | Stub behavior |
+|--------|--------------|
+| `mmh3` | `hash64()` → hashlib.blake2s-based fallback returning `(int, int)` |
+| `nest_asyncio2` | `apply()` → no-op (Pyodide's event loop is already re-entrant) |
+| `platformdirs` | `user_cache_dir()` etc. → `/tmp/inspect_ai/...` paths |
+| `psutil` | `pid_exists()` → False; `Process()` → raises `NotImplementedError` |
+| `tiktoken` | `get_encoding()` → object with `.encode()` returning `list(range(len(text)//4))` |
+| `s3fs` | `S3FileSystem` → raises on instantiation |
+| `boto3`, `aiobotocore`, `botocore` | Empty modules with typed sub-module attributes |
+| `textual` + `textual.containers` | `Container` → empty class |
+| `zipfile_zstd` | Empty module (just needs to be importable) |
+| `readline` | Empty module |
+
+**Note:** `rich` is **NOT** stubbed — it's available in Pyodide natively.
+
+The shims are loaded via `importlib.util.spec_from_file_location()` (not `import inspect_ai._pyodide.shims`) to avoid triggering `inspect_ai.__init__` before stubs are installed.
+
+### 2. Lazy imports (minimal production changes)
+
+A small number of changes move eager top-level imports to lazy (inside function bodies or `TYPE_CHECKING` guards). These are good practice regardless of Pyodide:
 
 | File | Change |
 |------|--------|
-| `_util/_async.py` | `nest_asyncio2` → try/except; `init_nest_asyncio()` no-ops when unavailable |
-| `_util/hash.py` | `mmh3` → try/except; falls back to `hashlib.blake2s` |
-| `model/_message_ids.py` | `mmh3` → try/except; falls back to `hashlib.blake2s` |
-| `_util/appdirs.py` | `platformdirs` → gated on `sys.platform`; falls back to `/tmp`-based paths |
-| `_util/file.py` | `s3fs` → try/except |
-| `_util/asyncfiles.py` | `boto3`/`aiobotocore`/`botocore` → try/except; `TransferConfig` guarded |
-| `log/_recorders/buffer/database.py` | `psutil` → try/except |
-| `model/_tokens.py` | `tiktoken` → try/except; falls back to `len(text) // 4` estimate |
-| `util/_console.py` | `readline` → try/except (removed from Pyodide stdlib) |
-| `log/__init__.py` | `zipfile_zstd` → try/except |
+| `_display/core/active.py` | Display backends lazy-imported inside `display()` |
+| `_display/core/display.py` | `rich`/`Console` → `TYPE_CHECKING`; lazy import in `input_screen()` |
+| `_view/view.py` | `psutil` → lazy import inside `view_acquire_port()` |
+| `approval/_human/approver.py` | `panel_approval` → lazy import inside function body |
+| `agent/_human/agent.py` | `HumanAgentPanel` → lazy import inside function body |
+| `__init__.py` | `view` → lazy via `__getattr__` |
 
-### Lazy imports (break eager import chains)
+### Consolidated dependencies (`deps.json`)
 
-| File | Change |
-|------|--------|
-| `_display/core/active.py` | All four display backends lazy-imported inside `display()` |
-| `_display/core/display.py` | `rich`/`Console` moved to `TYPE_CHECKING`; lazy import in `input_screen()` |
-| `_util/logger.py` | Split `LogHandler` into rich-based (normal) and stdlib-based (Emscripten) variants |
-| `util/_panel.py` | `textual.containers.Container` gated on `sys.platform`; stub base class for Emscripten |
-| `approval/_human/approver.py` | `panel_approval` import moved inside function body |
-| `agent/_human/agent.py` | `HumanAgentPanel` import moved inside function body |
-| `__init__.py` | `view` made lazy via `__getattr__`; `__version__` has fallback for missing metadata |
-| `_view/view.py` | `psutil` moved inside `view_acquire_port()` |
-| `_util/platform.py` | Added `is_emscripten()` utility |
+All Pyodide dependency lists are defined once in `_pyodide/deps.json`. Both `demo.html` (fetched via serve.py's `/deps.json` endpoint) and `test_pyodide.mjs` (read from disk) use this single source of truth.
 
-### Demo / test infrastructure
+## Bootstrap sequence
+
+In both `demo.html` and `test_pyodide.mjs`:
+
+1. Load Pyodide, install deps (from `deps.json`)
+2. Write source files to virtual FS
+3. Create dist-info metadata (for `importlib.metadata`)
+4. **Load `shims.py`** via `importlib.util` (installs stubs into `sys.modules`)
+5. `import inspect_ai` (works cleanly — stubs found in `sys.modules`)
+6. Run eval
+
+## Demo / test infrastructure
 
 | File | Purpose |
 |------|---------|
+| `_pyodide/shims.py` | Stub module installer — pre-populates `sys.modules` for Pyodide |
+| `_pyodide/deps.json` | Single source of truth for Pyodide dependency lists |
 | `_pyodide/demo.html` | Browser demo — loads Pyodide, installs deps, writes source to virtual FS, runs popularity eval (100 samples), serializes log, and displays results in an embedded Inspect View iframe via blob URL |
-| `_pyodide/serve.py` | Threaded local dev server — serves demo.html, `/inspect_ai_source.json` (all .py + data files as JSON), and `/view/*` (Inspect View UI assets) |
+| `_pyodide/serve.py` | Threaded local dev server — serves demo.html, `/deps.json`, `/inspect_ai_source.json` (all .py + data files as JSON), and `/view/*` (Inspect View UI assets) |
 | `_pyodide/test_pyodide.mjs` | Headless Node.js test — same flow as demo.html, no browser needed |
-| `_pyodide/screenshot.py` | Headless Playwright screenshot utility — starts serve.py, opens demo in headless Chromium, optionally runs eval, saves screenshot. Designed for AI agent iteration loops (see "How to test" below) |
+| `_pyodide/screenshot.py` | Headless Playwright screenshot utility — starts serve.py, opens demo in headless Chromium, optionally runs eval, saves screenshot |
 
-### Inspect View integration
+## Inspect View integration
 
 After an eval completes, the demo serializes the eval log JSON and passes it directly to Inspect View via a blob URL — no server round-trip. The JSON is wrapped in a `Blob`, a `blob:` URL is created with `URL.createObjectURL()`, and the View is loaded in an inline iframe with `?log_file=<blob_url>`. The View's `fetch()` natively supports blob URLs. Key details:
 
 - **Log serialization** uses `_read_log_from_bytes()` (synchronous `zipfile`) to avoid `asyncio.run()` and thread-spawning failures in Pyodide's single-threaded Emscripten environment.
 - **LazyList avoidance:** code never accesses `EvalLog.samples` or `.reductions` directly, since `LazyList.__bool__`/`__len__`/`__iter__` all trigger `asyncio.run()`.
 - **Blob URL handling:** `encodePathParts()` in `uri.ts` skips blob URLs to avoid mangling their opaque path structure.
-- **Single-file mode navigation fix:** In the View's single-file mode (used by the iframe), the home icon is hidden (no meaningful destination), `LogViewContainer` skips its `unloadLog` cleanup on unmount (the blob-loaded log must stay in the store), and `LogSampleDetailView` navigates to the hash root `/` instead of `logsUrl()` (which would produce a mangled blob URL route). This lets users click into a sample and back out without errors.
+- **Single-file mode navigation fix:** In the View's single-file mode (used by the iframe), the home icon is hidden (no meaningful destination), `LogViewContainer` skips its `unloadLog` cleanup on unmount (the blob-loaded log must stay in the store), and `LogSampleDetailView` navigates to the hash root `/` instead of `logsUrl()` (which would produce a mangled blob URL route).
 
-### Verification
+## Verification
 
-- **Pyodide (Node.js):** `node test_pyodide.mjs` → `status=success` in ~12s
+- **Pyodide (Node.js):** `node test_pyodide.mjs` → `status=success` in ~16s
 - **Native Python:** `pytest tests/model/test_mock_model_llm.py` → 9/9 passed, 0 regressions
 - **Lint:** `ruff check` clean
-- **Format:** `ruff format` clean
+- **Production diff:** Only 6 files changed outside `_pyodide/` (all lazy import improvements)
 
 ## How to test
 
@@ -144,15 +164,12 @@ python screenshot.py --wait-for-eval --scale 2 --console-log -o /tmp/hires.png
 | `--scale` | 1.0 | Device scale factor (2.0 for retina-like) |
 | `--console-log` | off | Print browser console messages to stdout |
 
-**Typical agent workflow:** make a change to `demo.html` or View code, rebuild the View (`cd _view/www && npx yarn build`), run `screenshot.py --wait-for-eval`, then read the screenshot to verify the result. The iframe content (Inspect View) can also be inspected programmatically via `page.evaluate()` on the iframe's `contentDocument` (same-origin).
-
 ## Next steps
 
 ### Short-term
 
 - **More test coverage:** Run a broader set of pytest suites natively to catch regressions in less-common code paths (e.g. scoring, solvers, dataset loading).
 - **Pyodide CI:** Add a GitHub Actions job that runs `test_pyodide.mjs` to catch future import breakage.
-- **Clean up demo deps:** Audit which micropip packages are actually needed vs. transitively pulled. Consider generating the dep list from pyproject.toml.
 
 ### Medium-term
 

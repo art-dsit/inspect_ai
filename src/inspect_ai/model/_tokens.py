@@ -113,15 +113,11 @@ def count_text_tokens(text: str) -> int:
     We add a 10% buffer since undercounting is worse than overcounting when
     this is used as a trigger for context compaction.
     """
-    try:
-        import tiktoken
+    import tiktoken
 
-        enc = tiktoken.get_encoding("o200k_base")
-        token_count = len(enc.encode(text))
-        return max(1, int(token_count * 1.1))
-    except ImportError:
-        # Rough estimate: ~4 chars per token (no tiktoken in e.g. Pyodide)
-        return max(1, len(text) // 4)
+    enc = tiktoken.get_encoding("o200k_base")
+    token_count = len(enc.encode(text))
+    return max(1, int(token_count * 1.1))
 
 
 def count_media_tokens(media: MediaContent) -> int:

@@ -250,7 +250,4 @@ relocated_module_attribute(
 
 if sys.version_info < (3, 14):
     # On Python < 3.14, this monkey-patches zipfile to support zstandard compression.
-    try:
-        import zipfile_zstd  # type: ignore[import-not-found, import-untyped]  # noqa: F401
-    except ImportError:
-        pass
+    import zipfile_zstd  # type: ignore[import-not-found, import-untyped]  # noqa: F401

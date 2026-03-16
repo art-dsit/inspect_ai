@@ -17,7 +17,7 @@ def display() -> Display:
     global _active_display
     if _active_display is None:
         dtype = display_type()
-        if sys.platform == "emscripten" or dtype == "log":
+        if dtype == "log":
             from ..log.display import LogDisplay
 
             _active_display = LogDisplay()

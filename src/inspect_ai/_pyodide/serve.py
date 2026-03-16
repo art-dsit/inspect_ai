@@ -18,12 +18,13 @@ import mimetypes
 import os
 import sys
 from http.server import HTTPServer, SimpleHTTPRequestHandler
-from socketserver import ThreadingMixIn
 from pathlib import Path
+from socketserver import ThreadingMixIn
 
 # Root of the inspect_ai package source
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent  # src/inspect_ai/
 DEMO_DIR = Path(__file__).resolve().parent  # src/inspect_ai/_pyodide/
+DEPS_JSON = DEMO_DIR / "deps.json"  # Consolidated dependency list
 VIEW_DIST = PACKAGE_ROOT / "_view" / "www" / "dist"  # Inspect View built assets
 # Content-type map for view assets
 CONTENT_TYPES: dict[str, str] = {
@@ -41,7 +42,7 @@ def collect_source_files() -> dict[str, str]:
     include_ext = {".py", ".jsonl", ".json", ".csv", ".txt"}
     files: dict[str, str] = {}
     for root, _dirs, filenames in os.walk(PACKAGE_ROOT):
-        # Skip __pycache__, .egg-info, _pyodide itself (no need to ship the demo)
+        # Skip __pycache__, .egg-info, etc.
         rel_root = Path(root).relative_to(PACKAGE_ROOT.parent)
         skip = {"__pycache__", ".egg-info", "node_modules", ".venv"}
         if any(part in skip or part.endswith(".egg-info") for part in rel_root.parts):
@@ -73,6 +74,8 @@ class DemoHandler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/" or self.path == "/demo.html":
             self.serve_file(DEMO_DIR / "demo.html", "text/html")
+        elif self.path == "/deps.json":
+            self.serve_file(DEPS_JSON, "application/json")
         elif self.path == "/inspect_ai_source.json":
             data = get_source_json().encode("utf-8")
             self.send_response(200)

@@ -1,19 +1,14 @@
 import hashlib
 
-try:
-    import mmh3
-except ImportError:
-    mmh3 = None  # type: ignore
+import mmh3
 
 
 def mm3_hash(message: str) -> str:
-    if mmh3 is not None:
-        # Generate the 128-bit hash as two 64-bit integers
-        h1, h2 = mmh3.hash64(message.encode("utf-8"))  # pylint: disable=E0633
-        # Convert to unsigned integers and then to hexadecimal
-        return f"{h1 & 0xFFFFFFFFFFFFFFFF:016x}{h2 & 0xFFFFFFFFFFFFFFFF:016x}"
-    else:
-        return hashlib.blake2s(message.encode("utf-8"), digest_size=16).hexdigest()
+    # Generate the 128-bit hash as two 64-bit integers
+    h1, h2 = mmh3.hash64(message.encode("utf-8"))  # pylint: disable=E0633
+
+    # Convert to unsigned integers and then to hexadecimal
+    return f"{h1 & 0xFFFFFFFFFFFFFFFF:016x}{h2 & 0xFFFFFFFFFFFFFFFF:016x}"
 
 
 def base57_id_hash(content: str) -> str:

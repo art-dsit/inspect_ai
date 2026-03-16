@@ -1,19 +1,6 @@
-import sys
 from pathlib import Path
 
-if sys.platform == "emscripten":
-    from typing import Callable
-
-    def _emscripten_path_factory(subdir: str) -> Callable[[str], Path]:
-        def _path(appname: str) -> Path:
-            return Path("/tmp") / appname / subdir
-
-        return _path
-
-    user_cache_path: Callable[..., Path] = _emscripten_path_factory("cache")
-    user_data_path: Callable[..., Path] = _emscripten_path_factory("data")
-else:
-    from platformdirs import user_cache_path, user_data_path
+from platformdirs import user_cache_path, user_data_path
 
 from inspect_ai._util.constants import PKG_NAME
 

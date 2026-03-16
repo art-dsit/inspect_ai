@@ -15,10 +15,7 @@ from inspect_ai.log._metric import recompute_metrics
 from inspect_ai.log._score import edit_score
 from inspect_ai.solver._human_agent import human_agent
 
-try:
-    __version__ = importlib_version(PKG_NAME)
-except Exception:
-    __version__ = "0.0.0.dev0"
+__version__ = importlib_version(PKG_NAME)
 
 
 def __getattr__(name: str):  # type: ignore

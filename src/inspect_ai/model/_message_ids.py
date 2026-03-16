@@ -6,12 +6,8 @@ import json
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
+import mmh3
 from shortuuid import uuid as shortuuid
-
-try:
-    import mmh3
-except ImportError:
-    mmh3 = None  # type: ignore
 
 from ._chat_message import ChatMessage
 from ._model_output import ModelOutput
@@ -39,16 +35,11 @@ def stable_message_ids() -> Callable[[Sequence[ChatMessage] | ModelEvent], None]
     hash_to_ids: dict[str, list[str]] = {}
 
     def hash_message(message: ChatMessage) -> str:
-        """Hash message content using mmh3 (fast 128-bit hash), with hashlib fallback."""
+        """Hash message content using mmh3 (fast 128-bit hash)."""
         msg_dict = message.model_dump(exclude={"id"}, exclude_none=True)
         json_str = json.dumps(msg_dict, sort_keys=True)
-        if mmh3 is not None:
-            hash_bytes = mmh3.hash_bytes(json_str.encode())
-            return hash_bytes.hex()
-        else:
-            import hashlib
-
-            return hashlib.blake2s(json_str.encode(), digest_size=16).hexdigest()
+        hash_bytes = mmh3.hash_bytes(json_str.encode())
+        return hash_bytes.hex()
 
     def get_id(message: ChatMessage, conversation: list[ChatMessage]) -> str:
         """Get stable ID for message, avoiding duplicates within conversation."""

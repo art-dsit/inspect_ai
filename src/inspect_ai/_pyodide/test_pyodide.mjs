@@ -12,10 +12,13 @@ import { dirname } from "path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Read consolidated dependency list
+const deps = JSON.parse(readFileSync(join(__dirname, "deps.json"), "utf-8"));
+
 // Collect all .py files under src/inspect_ai/
 function collectSourceFiles(rootDir) {
   const files = {};
-  const skip = new Set(["__pycache__", "node_modules", ".venv", "_pyodide"]);
+  const skip = new Set(["__pycache__", "node_modules", ".venv"]);
 
   function walk(dir) {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -36,56 +39,22 @@ function collectSourceFiles(rootDir) {
 async function main() {
   const t0 = Date.now();
 
-  console.log("[1/5] Loading Pyodide…");
+  console.log("[1/6] Loading Pyodide…");
   const pyodide = await loadPyodide();
   console.log(`       Done (${Date.now() - t0}ms)`);
 
-  console.log("[2/5] Installing dependencies…");
-  await pyodide.loadPackage(["micropip", "pydantic", "numpy", "sqlite3", "pygments", "rich", "zstandard", "regex"]);
+  console.log("[2/6] Installing dependencies…");
+  await pyodide.loadPackage(deps.pyodide_builtins);
   const micropip = pyodide.pyimport("micropip");
-  await micropip.install([
-    "anyio",
-    "sniffio",
-    "docstring-parser",
-    "jsonlines",
-    "jsonpatch",
-    "jsonpath-ng",
-    "jsonref",
-    "jsonschema",
-    "python-dotenv",
-    "pyyaml",
-    "semver",
-    "shortuuid",
-    "tenacity",
-    "typing_extensions",
-    "httpx",
-    "click",
-    "beautifulsoup4",
-    "fsspec",
-    "ijson",
-    "zipp",
-    "python-dateutil",
-    "markdown-it-py",
-    "mdurl",
-    "httpcore",
-    "h11",
-    "certifi",
-    "idna",
-    "charset-normalizer",
-    "docstring-parser",
-    "jsonpatch",
-    "jsonpointer",
-    "jsonpath-ng",
-    "ply",
-  ]);
+  await micropip.install(deps.micropip);
   console.log(`       Done (${Date.now() - t0}ms)`);
 
-  console.log("[3/5] Collecting source files…");
+  console.log("[3/6] Collecting source files…");
   const packageRoot = join(__dirname, "..");  // src/inspect_ai/
   const sourceFiles = collectSourceFiles(packageRoot);
   console.log(`       Collected ${Object.keys(sourceFiles).length} .py files`);
 
-  console.log("[4/5] Writing source into Pyodide virtual FS…");
+  console.log("[4/6] Writing source into Pyodide virtual FS…");
   const sitePackages = pyodide.runPython(`
 import site, sys
 paths = site.getsitepackages()
@@ -117,7 +86,29 @@ with open(os.path.join(dist_info, "RECORD"), "w") as f:
     f.write("")
   `);
 
-  console.log("[5/5] Running eval with mockllm…");
+  // 5. Install Pyodide shims (stub modules for unavailable dependencies)
+  // We run the shims file directly (not via import) because importing
+  // inspect_ai._pyodide.shims would trigger inspect_ai.__init__ first,
+  // which eagerly imports the full module tree before stubs are installed.
+  console.log("[5/6] Installing Pyodide shims…");
+  try {
+    pyodide.runPython(`
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location(
+    "inspect_ai._pyodide.shims",
+    "${sitePackages}/inspect_ai/_pyodide/shims.py",
+)
+mod = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = mod
+spec.loader.exec_module(mod)
+    `);
+  } catch (e) {
+    console.error("ERROR installing shims:", e.message);
+    process.exit(1);
+  }
+  console.log(`       Done (${Date.now() - t0}ms)`);
+
+  console.log("[6/6] Running eval with mockllm…");
   try {
     const result = await pyodide.runPythonAsync(`
 import os, sys

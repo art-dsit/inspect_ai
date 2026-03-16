@@ -9,22 +9,14 @@ from urllib.parse import urlparse
 
 import anyio
 import anyio.to_thread
+import boto3
+from aiobotocore.config import AioConfig
+from aiobotocore.response import StreamingBody
 from anyio import AsyncFile, EndOfStream, open_file
 from anyio.abc import ByteReceiveStream
+from boto3.s3.transfer import TransferConfig
+from botocore.config import Config
 from typing_extensions import override
-
-try:
-    import boto3
-    from aiobotocore.config import AioConfig
-    from aiobotocore.response import StreamingBody
-    from boto3.s3.transfer import TransferConfig
-    from botocore.config import Config
-except ImportError:
-    boto3 = None  # type: ignore
-    AioConfig = None  # type: ignore
-    StreamingBody = None  # type: ignore
-    TransferConfig = None  # type: ignore
-    Config = None  # type: ignore
 
 from inspect_ai._util._async import current_async_backend
 from inspect_ai._util.file import FileInfo, file, filesystem
@@ -494,14 +486,10 @@ def get_async_filesystem() -> AsyncFilesystem:
 # - multipart_threshold: use multipart upload for files larger than this
 # - multipart_chunksize: size of each part in a multipart upload
 # - max_concurrency: maximum threads for concurrent part uploads
-_S3_TRANSFER_CONFIG = (
-    TransferConfig(
-        multipart_threshold=8 * 1024 * 1024,  # 8 MB
-        multipart_chunksize=8 * 1024 * 1024,  # 8 MB
-        max_concurrency=10,
-    )
-    if TransferConfig is not None
-    else None
+_S3_TRANSFER_CONFIG = TransferConfig(
+    multipart_threshold=8 * 1024 * 1024,  # 8 MB
+    multipart_chunksize=8 * 1024 * 1024,  # 8 MB
+    max_concurrency=10,
 )
 
 # fsspec write buffer size for cloud storage backends (GCS, Azure, etc.).

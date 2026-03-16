@@ -78,38 +78,29 @@ paths[0] if paths else sys.prefix + '/lib/python' + '.'.join(map(str, sys.versio
 
       try {
         // 1. Load Pyodide
-        log('[1/5] Loading Pyodide…');
+        log('[1/6] Loading Pyodide…');
         const pyodide = await loadPyodide();
         log('       Pyodide loaded.', 'ok');
 
-        // 2. Install dependencies
-        log('[2/5] Installing dependencies…');
-        await pyodide.loadPackage([
-          'micropip', 'pydantic', 'numpy', 'sqlite3',
-          'pygments', 'rich', 'zstandard', 'regex',
-        ]);
+        // 2. Install dependencies (from deps.json)
+        log('[2/6] Installing dependencies…');
+        const depsResp = await fetch('/deps.json');
+        if (!depsResp.ok) throw new Error(`Failed to fetch deps.json: ${depsResp.status}`);
+        const deps = await depsResp.json();
+        await pyodide.loadPackage(deps.pyodide_builtins);
         const micropip = pyodide.pyimport('micropip');
-        await micropip.install([
-          'anyio', 'sniffio', 'docstring-parser', 'jsonlines',
-          'jsonpatch', 'jsonpath-ng', 'jsonref', 'jsonschema',
-          'python-dotenv', 'pyyaml', 'semver', 'shortuuid',
-          'tenacity', 'typing_extensions', 'httpx', 'click',
-          'beautifulsoup4', 'fsspec', 'ijson', 'zipp',
-          'python-dateutil', 'markdown-it-py', 'mdurl',
-          'httpcore', 'h11', 'certifi', 'idna', 'charset-normalizer',
-          'jsonpointer', 'ply',
-        ]);
+        await micropip.install(deps.micropip);
         log('       Dependencies installed.', 'ok');
 
         // 3. Fetch inspect_ai source
-        log('[3/5] Fetching inspect_ai source…');
+        log('[3/6] Fetching inspect_ai source…');
         const resp = await fetch('/inspect_ai_source.json');
         if (!resp.ok) throw new Error(`Failed to fetch source: ${resp.status} — are you using serve.py?`);
         const sourceFiles = await resp.json();
         log(`       Received ${Object.keys(sourceFiles).length} files.`, 'ok');
 
         // 4. Write source into virtual FS
-        log('[4/5] Writing source into virtual filesystem…');
+        log('[4/6] Writing source into virtual filesystem…');
         const { count, sitePkgPath } = writeSourceToFS(pyodide, sourceFiles);
         log(`       Wrote ${count} files.`, 'ok');
 
@@ -124,8 +115,25 @@ with open(os.path.join(dist_info, "RECORD"), "w") as f:
     f.write("")
         `);
 
-        // 5. Run the eval
-        log('[5/5] Running popularity eval (100 samples) with mockllm…');
+        // 5. Install Pyodide shims (stub modules for unavailable dependencies)
+        // Load shims via spec_from_file_location to avoid triggering
+        // inspect_ai.__init__ (which would import the full tree before stubs
+        // are installed).
+        log('[5/6] Installing Pyodide shims…');
+        pyodide.runPython(`
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location(
+    "inspect_ai._pyodide.shims",
+    "${sitePkgPath}/inspect_ai/_pyodide/shims.py",
+)
+mod = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = mod
+spec.loader.exec_module(mod)
+        `);
+        log('       Shims installed.', 'ok');
+
+        // 6. Run the eval
+        log('[6/6] Running popularity eval (100 samples) with mockllm…');
         const result = await pyodide.runPythonAsync(`
 import os
 os.environ["INSPECT_LOG_DIR"] = "/tmp/inspect_logs"
@@ -169,7 +177,7 @@ f"status={status}, scores={scores}"
 
         // 6. Serialize the eval log and pass to Inspect View via blob URL
         log('');
-        log('[6] Preparing log for Inspect View…');
+        log('[7] Preparing log for Inspect View…');
         const logJson = await pyodide.runPythonAsync(`
 # eval_async() returns an EvalLog with lazy-loaded samples/reductions.
 # The lazy loader calls asyncio.run() or uses anyio threads — both fail
