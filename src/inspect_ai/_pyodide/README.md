@@ -65,11 +65,11 @@ A small number of changes move eager top-level imports to lazy (inside function 
 
 ### Consolidated dependencies (`deps.json`)
 
-All Pyodide dependency lists are defined once in `_pyodide/deps.json`. Both `demo.html` (fetched via serve.py's `/deps.json` endpoint) and `test_pyodide.mjs` (read from disk) use this single source of truth.
+All Pyodide dependency lists are defined once in `_pyodide/deps.json`. Both `demo_webllm.html` (fetched as a static asset) and `test_pyodide.mjs` (read from disk) use this single source of truth.
 
 ## Bootstrap sequence
 
-In both `demo.html` and `test_pyodide.mjs`:
+In both `demo_webllm.html` and `test_pyodide.mjs`:
 
 1. Load Pyodide, install deps (from `deps.json`)
 2. Write source files to virtual FS
@@ -84,10 +84,11 @@ In both `demo.html` and `test_pyodide.mjs`:
 |------|---------|
 | `_pyodide/shims.py` | Stub module installer — pre-populates `sys.modules` for Pyodide |
 | `_pyodide/deps.json` | Single source of truth for Pyodide dependency lists |
-| `_pyodide/demo.html` | Browser demo — loads Pyodide, installs deps, writes source to virtual FS, runs popularity eval (100 samples), serializes log, and displays results in an embedded Inspect View iframe via blob URL |
-| `_pyodide/serve.py` | Threaded local dev server — serves demo.html, `/deps.json`, `/inspect_ai_source.json` (all .py + data files as JSON), and `/view/*` (Inspect View UI assets) |
-| `_pyodide/test_pyodide.mjs` | Headless Node.js test — same flow as demo.html, no browser needed |
-| `_pyodide/screenshot.py` | Headless Playwright screenshot utility — starts serve.py, opens demo in headless Chromium, optionally runs eval, saves screenshot |
+| `_pyodide/demo_webllm.html` | Browser demo — loads Pyodide + WebLLM, installs deps, writes source to virtual FS, runs popularity eval with a local WebGPU model, serializes log, and displays results in an embedded Inspect View iframe via blob URL |
+| `_pyodide/bundle.py` | Build script — produces a self-contained static directory (index.html, deps.json, inspect_ai_source.json, view/) servable by any static file server |
+| `_pyodide/test_pyodide.mjs` | Headless Node.js test — same flow as demo, no browser needed |
+| `_pyodide/test_webllm.py` | Headless Playwright test — builds bundle, serves statically, runs eval in headless Chromium with WebGPU |
+| `_pyodide/screenshot.py` | Headless Playwright screenshot utility — builds bundle, opens demo in headless Chromium, optionally runs eval, saves screenshot |
 
 ## Inspect View integration
 
@@ -119,25 +120,25 @@ node test_pyodide.mjs
 
 ```bash
 cd src/inspect_ai/_pyodide
-python serve.py
-# Open http://localhost:8080 in Chrome
-# Click "Run Eval" — runs popularity (100 samples) with mockllm
+python bundle.py --output-dir /tmp/pyodide_bundle
+cd /tmp/pyodide_bundle && python -m http.server 37575
+# Open http://localhost:37575 in Chrome (needs WebGPU — Chrome 113+)
+# Select a model and sample count, click "Run Eval with WebLLM"
 # After completion, Inspect View loads inline in an iframe
 ```
 
-### Headless browser (Playwright — for AI agents)
+### Headless browser (Playwright)
 
-`screenshot.py` launches serve.py, opens the demo in headless Chromium via [Playwright](https://playwright.dev/python/), optionally runs the eval, and saves a full-page screenshot. This lets AI coding agents (Claude Code, etc.) iterate on the demo visually without a real browser window.
+`test_webllm.py` builds the static bundle, serves it, and runs the full eval in headless Chromium with WebGPU. `screenshot.py` does the same but captures a screenshot instead.
 
-**One-time setup:**
+**WebLLM test:**
 
 ```bash
-pip install playwright            # Python bindings
-playwright install chromium       # Download headless Chromium
-playwright install-deps chromium  # System libraries (needs sudo/root)
+cd src/inspect_ai/_pyodide
+uv run python test_webllm.py
 ```
 
-**Usage:**
+**Screenshot tool:**
 
 ```bash
 cd src/inspect_ai/_pyodide
@@ -150,6 +151,13 @@ python screenshot.py --wait-for-eval -o /tmp/result.png
 
 # High-resolution (2x) with browser console output
 python screenshot.py --wait-for-eval --scale 2 --console-log -o /tmp/hires.png
+```
+
+**One-time Playwright setup:**
+
+```bash
+uv pip install playwright
+uv run python -m playwright install chromium
 ```
 
 **Options:**
@@ -173,7 +181,6 @@ python screenshot.py --wait-for-eval --scale 2 --console-log -o /tmp/hires.png
 
 ### Medium-term
 
-- **WebLLM model provider:** Add a model provider that uses [WebLLM](https://webllm.mlc.ai/) to run small LLMs entirely in the browser via WebGPU. This would allow real (not mocked) evals without any server.
 - **Build a proper wheel:** Instead of writing raw .py files to the virtual FS, build a pure-Python `.whl` (excluding C extensions) that micropip can install directly.
 - **Handle more import paths:** Some features (sandboxes, MCP tools, Docker) will hit additional blockers if invoked. Guard or stub them as needed.
 

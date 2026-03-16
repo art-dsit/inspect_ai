@@ -1,6 +1,6 @@
 /**
  * Headless test of inspect_ai in Pyodide (Node.js, no browser needed).
- * Replicates what demo.html does: load Pyodide, install deps, write source, run eval.
+ * Replicates what demo_webllm.html does: load Pyodide, install deps, write source, run eval.
  */
 
 import { loadPyodide } from "pyodide";

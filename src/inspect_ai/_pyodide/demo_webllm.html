@@ -201,7 +201,7 @@ paths[0] if paths else sys.prefix + '/lib/python' + '.'.join(map(str, sys.versio
 
         // 5. Install dependencies
         log('[5/8] Installing Python dependencies…');
-        const depsResp = await fetch('/deps.json');
+        const depsResp = await fetch('deps.json');
         if (!depsResp.ok) throw new Error(`Failed to fetch deps.json: ${depsResp.status}`);
         const deps = await depsResp.json();
         await pyodide.loadPackage(deps.pyodide_builtins);
@@ -211,7 +211,7 @@ paths[0] if paths else sys.prefix + '/lib/python' + '.'.join(map(str, sys.versio
 
         // 6. Fetch and write inspect_ai source
         log('[6/8] Loading inspect_ai source…');
-        const resp = await fetch('/inspect_ai_source.json');
+        const resp = await fetch('inspect_ai_source.json');
         if (!resp.ok) throw new Error(`Failed to fetch source: ${resp.status}`);
         const sourceFiles = await resp.json();
         const { count, sitePkgPath } = writeSourceToFS(pyodide, sourceFiles);
@@ -333,7 +333,7 @@ eval_log_json_str(log)
         log('       Loading Inspect View…');
         const blob = new Blob([logJson], { type: 'application/json' });
         const blobUrl = URL.createObjectURL(blob);
-        const viewUrl = `/view/?log_file=${encodeURIComponent(blobUrl)}`;
+        const viewUrl = `view/?log_file=${encodeURIComponent(blobUrl)}`;
         log('       Ready.', 'ok');
         log('');
 
