@@ -245,10 +245,34 @@ spec.loader.exec_module(mod)
         log(`[8/8] Running popularity eval (${sampleLimit} samples) with WebLLM (${modelId})…`);
         log('       This will make real LLM calls in your browser!', 'warn');
 
+        // Redirect Python stdout/stderr into the status div so Inspect's
+        // plain display progress lines appear in real time.
+        let progressLine = null;  // reusable element for overwriting progress
+        pyodide.setStdout({
+          batched: (text) => {
+            // Inspect's PlainDisplay prints "Steps: N/M ..." lines that we
+            // want to overwrite in place (like a terminal \r).
+            const trimmed = text.trimEnd();
+            if (trimmed.startsWith('Steps:') || trimmed.startsWith('Running ')) {
+              if (!progressLine) {
+                progressLine = document.createElement('span');
+                progressLine.className = 'info';
+                statusEl.appendChild(progressLine);
+              }
+              progressLine.textContent = '       ' + trimmed + '\n';
+            } else if (trimmed.length > 0) {
+              // Other output (task header, results) — append normally
+              progressLine = null;
+              log('       ' + trimmed);
+            }
+            statusEl.scrollTop = statusEl.scrollHeight;
+          }
+        });
+        pyodide.setStderr({ batched: () => {} });  // suppress stderr noise
+
         const result = await pyodide.runPythonAsync(`
 import os
 os.environ["INSPECT_LOG_DIR"] = "/tmp/inspect_logs"
-os.environ["INSPECT_DISPLAY"] = "none"
 os.environ.setdefault("INSPECT_LOG_LEVEL", "warning")
 
 from inspect_ai import Task, eval_async
@@ -278,7 +302,7 @@ task = Task(
 results = await eval_async(
     task,
     model="webllm/${modelId}",
-    display="none",
+    display="plain",
     limit=${sampleLimit},
 )
 r = results[0]
@@ -287,13 +311,17 @@ scores = str(r.results.scores) if r.results else "None"
 f"status={status}, scores={scores}"
         `);
 
+        // Restore default stdout
+        pyodide.setStdout({ batched: (text) => console.log(text) });
+        progressLine = null;
+
         log('');
         log('=== RESULT ===', 'ok');
         log(result, 'ok');
 
         // Serialize log and show in Inspect View
         log('');
-        log('[9] Preparing log for Inspect View…');
+        log('[9] Serializing eval log…');
         const logJson = await pyodide.runPythonAsync(`
 from inspect_ai.log._recorders.eval import _read_log_from_bytes
 from inspect_ai.log._file import eval_log_json_str
@@ -301,6 +329,7 @@ with open(results[0].location, "rb") as f:
     log = _read_log_from_bytes(f, results[0].location, header_only=False)
 eval_log_json_str(log)
         `);
+        log('       Loading Inspect View…');
         const blob = new Blob([logJson], { type: 'application/json' });
         const blobUrl = URL.createObjectURL(blob);
         const viewUrl = `/view/?log_file=${encodeURIComponent(blobUrl)}`;
