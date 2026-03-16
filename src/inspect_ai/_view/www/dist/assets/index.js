@@ -118739,7 +118739,7 @@ const ViewerOptionsPopover = ({
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: clsx(styles$1d.fullWidth, styles$1d.fullWidthPadded), children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: styles$1d.logDir, children: logDir2 }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: clsx(styles$1d.spacer) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: clsx("text-style-label", "text-style-secondary"), children: "Version" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: clsx(), children: "0.3.189-36-g33d71bc6a" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: clsx(), children: "0.3.189-40-g375475598" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: clsx("text-style-label", "text-style-secondary"), children: "Schema" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: clsx(), children: DB_VERSION }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: clsx(styles$1d.spacer) }),
@@ -193535,8 +193535,12 @@ const useLogNavigation = () => {
   const { logPath } = useParams();
   const logDir2 = useStore((state) => state.logs.logDir);
   const loadedLog = useStore((state) => state.log.loadedLog);
+  const singleFileMode = useStore((state) => state.app.singleFileMode);
   const selectTab = reactExports.useCallback(
     (tabId) => {
+      if (singleFileMode) {
+        return;
+      }
       if (loadedLog && logPath) {
         const url = logsUrlRaw(logPath, tabId);
         navigate(url);
@@ -193545,7 +193549,7 @@ const useLogNavigation = () => {
         navigate(url);
       }
     },
-    [loadedLog, logPath, logDir2, navigate]
+    [loadedLog, logPath, logDir2, navigate, singleFileMode]
   );
   return {
     selectTab
