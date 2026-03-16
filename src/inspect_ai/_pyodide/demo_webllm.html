@@ -27,11 +27,11 @@
   </style>
 </head>
 <body>
-  <h1>Inspect AI + WebLLM — Real LLM in the Browser</h1>
-  <p>Runs the <strong>popularity</strong> eval using a <strong>real LLM</strong> via
-     <a href="https://github.com/mlc-ai/web-llm" style="color:#89b4fa">WebLLM</a> (WebGPU).
-     No server, no API keys — the model runs entirely in your browser.</p>
-  <p><em>Requires a browser with WebGPU support (Chrome 113+, Edge 113+).</em></p>
+  <h1>Inspect AI + WebLLM</h1>
+  <p>Runs an <a href="https://inspect.ai" style="color:#89b4fa">Inspect</a> eval against a local LLM
+     served by <a href="https://github.com/mlc-ai/web-llm" style="color:#89b4fa">WebLLM</a> (WebGPU).
+     Both the eval framework and the model run client-side — no server or API keys needed.</p>
+  <p><em>Requires WebGPU (Chrome 113+, Edge 113+). First run downloads model weights to browser cache.</em></p>
 
   <label for="model-select">Model:
     <select id="model-select">
@@ -46,8 +46,9 @@
 
   <label for="sample-limit">Samples:
     <select id="sample-limit">
-      <option value="5">5 (quick test)</option>
-      <option value="10" selected>10</option>
+      <option value="3" selected>3 (quick test)</option>
+      <option value="5">5</option>
+      <option value="10">10</option>
       <option value="25">25</option>
       <option value="50">50</option>
       <option value="100">100 (full dataset)</option>
