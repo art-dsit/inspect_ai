@@ -78,8 +78,8 @@ def main() -> None:
                 browser.close()
                 return
 
-            # Select a model that doesn't need shader-f16
-            page.select_option("#model-select", "SmolLM2-360M-Instruct-q4f32_1-MLC")
+            # Select default model (Qwen3-0.6B, no shader-f16 needed)
+            page.select_option("#model-select", "Qwen3-0.6B-q4f32_1-MLC")
             page.select_option("#sample-limit", "5")
 
             print("Clicking Run Eval...")
