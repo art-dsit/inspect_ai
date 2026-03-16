@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from inspect_ai._util.content import Content, ContentReasoning, ContentText
 from inspect_ai.tool import ToolChoice, ToolInfo
 
 from .._chat_message import ChatMessage
@@ -20,6 +21,7 @@ from .._generate_config import GenerateConfig
 from .._model import ModelAPI
 from .._model_call import ModelCall
 from .._model_output import ModelOutput, ModelUsage
+from .._reasoning import parse_content_with_reasoning, reasoning_to_think_tag
 
 
 class WebLLMAPI(ModelAPI):
@@ -46,11 +48,17 @@ class WebLLMAPI(ModelAPI):
         messages = []
         for msg in input:
             content = msg.content
-            # Flatten Content lists to plain text for WebLLM
+            # Flatten Content lists to plain text for WebLLM,
+            # re-serialising ContentReasoning as <think> tags so the model
+            # sees its own prior reasoning in the conversation history.
             if isinstance(content, list):
                 text_parts = []
                 for part in content:
-                    if hasattr(part, "text"):
+                    if isinstance(part, ContentReasoning):
+                        text_parts.append(reasoning_to_think_tag(part))
+                    elif isinstance(part, ContentText):
+                        text_parts.append(part.text)
+                    elif hasattr(part, "text"):
                         text_parts.append(part.text)
                 content = "\n".join(text_parts) if text_parts else ""
             messages.append({"role": msg.role, "content": content})
@@ -70,7 +78,7 @@ class WebLLMAPI(ModelAPI):
         result_json = await js.webllmGenerate(request_json)
         result = json.loads(result_json)
 
-        content_text: str = result.get("content", "")
+        raw_content: str = result.get("content", "")
         usage_data = result.get("usage", {})
 
         usage = ModelUsage(
@@ -80,15 +88,32 @@ class WebLLMAPI(ModelAPI):
             + usage_data.get("completion_tokens", 0),
         )
 
+        # Parse <think> tags from models that emit them (e.g. Qwen3)
+        clean_text, reasoning = parse_content_with_reasoning(raw_content)
+
+        assistant_content: str | list[Content]
+        if reasoning:
+            assistant_content = [
+                ContentReasoning(
+                    reasoning=reasoning.reasoning,
+                    signature=reasoning.signature,
+                    redacted=reasoning.redacted,
+                    summary=reasoning.summary,
+                ),
+                ContentText(text=clean_text),
+            ]
+        else:
+            assistant_content = clean_text
+
         output = ModelOutput.from_content(
             model=self.model_name,
-            content=content_text,
+            content=assistant_content,
             stop_reason="stop",
         )
         output.usage = usage
 
         model_call = ModelCall.create(
             {"model": self.model_name, "messages": messages},
-            {"content": content_text},
+            {"content": raw_content},
         )
         return output, model_call
