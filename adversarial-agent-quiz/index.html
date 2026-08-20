@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trace the Boundary — an Inspect code walk</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header>
+  <button id="home" class="brand">I/ &nbsp;TRACE THE BOUNDARY</button>
+  <div id="progress" hidden>
+    <span id="count"></span>
+    <i><b id="bar"></b></i>
+  </div>
+  <span class="offline">LOCAL FILES · NO NETWORK</span>
+</header>
+
+<main>
+
+  <!-- ───────────────────────── welcome ───────────────────────── -->
+  <section id="welcome" class="welcome">
+    <div>
+      <p class="tag">AN INSPECT CODE WALK</p>
+      <h1>A tour of the Inspect codebase, <em>one boundary at a time.</em></h1>
+      <p class="lede">
+        Twenty-one questions, each landing in a different part of the tree — the
+        agent loop, sandbox providers, container configuration and the sample
+        lifecycle, file transfer, injected tools, checkpoints, the model layer,
+        extension hooks, the agent bridge, MCP servers, approval and limits, the
+        transcript, the viewer and what your browser does with it, scorers. You
+        start knowing nothing about Inspect. Security is the lens, not the
+        subject: asking who holds the authority at each boundary turns out to be
+        the fastest way to learn how the thing is built.
+      </p>
+      <ul class="promises">
+        <li>Every excerpt is quoted from a real file, with real line numbers</li>
+        <li>Each question tells you where to look before it asks anything</li>
+        <li>Difficulty ramps from "what is a Task" to reading control flow closely</li>
+        <li>Existing controls are labelled as such — not everything is a hole</li>
+        <li>Your place is kept in the URL, so a reload comes back to it</li>
+      </ul>
+      <button id="start" class="primary">▶ &nbsp;Start the walk</button>
+      <small>About 50 minutes · no prior Inspect knowledge needed</small>
+    </div>
+
+    <aside>
+      <p class="tag">FOUR PLACES CODE RUNS</p>
+      <div class="node browser">
+        <small>YOURS — BUT IT IS A WEB APP</small>
+        <strong>Your browser</strong>
+        <span>inspect view &middot; renders text the agent wrote</span>
+      </div>
+      <div class="arrow">
+        reads your logs
+        <b>↕</b>
+      </div>
+      <div class="node host">
+        <small>TRUSTED — YOUR MACHINE</small>
+        <strong>The Inspect process</strong>
+        <span>task &middot; solver &middot; tools &middot; scorer &middot; API keys &middot; logs</span>
+      </div>
+      <div class="arrow">
+        a few deliberate openings
+        <b>↕</b>
+      </div>
+      <div class="node box">
+        <small>HOSTILE — ASSUME THE WORST</small>
+        <strong>The agent's sandbox</strong>
+        <span>commands &middot; files &middot; processes &middot; model requests</span>
+      </div>
+      <div class="arrow">
+        runs on
+        <b>↓</b>
+      </div>
+      <div class="node under">
+        <small>UNDERNEATH — AND SHARED</small>
+        <strong>The sandbox's host</strong>
+        <span>kernel &middot; container runtime &middot; a node, often shared</span>
+      </div>
+      <p class="rule">
+        The agent is meant to be stuck in the third box. Most of the codebase
+        you are about to walk is the openings between these four — what comes
+        through them, and which side is holding the authority.
+      </p>
+    </aside>
+  </section>
+
+  <!-- ───────────────────────── lesson ───────────────────────── -->
+  <section id="lesson" hidden>
+    <nav id="route"></nav>
+
+    <div class="grid">
+      <article>
+        <div class="title">
+          <div>
+            <p id="stage" class="tag"></p>
+            <h2 id="qtitle"></h2>
+          </div>
+          <span id="pips" class="pips" title="difficulty"></span>
+        </div>
+
+        <div id="brief" class="brief"></div>
+
+        <div class="source">
+          <div class="chrome">
+            <span class="dots">● ● ●</span>
+            <code id="path"></code>
+            <button id="copy" title="copy an editor command for this location">copy</button>
+          </div>
+          <pre><code id="code"></code></pre>
+        </div>
+
+        <div class="task">
+          <b>LOOK FOR</b>
+          <p id="look"></p>
+        </div>
+
+        <details id="hintbox">
+          <summary>Stuck? Show a hint</summary>
+          <p id="hint"></p>
+        </details>
+      </article>
+
+      <aside class="question">
+        <p id="qnum" class="tag"></p>
+        <h3 id="question"></h3>
+        <form id="choices"></form>
+        <!-- answer sits above the button: once revealed, the explanation reads
+             before the control that leaves the page -->
+        <div id="answer" hidden></div>
+        <button id="check" class="primary" disabled>Check answer</button>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── finish ───────────────────────── -->
+  <section id="finish" class="finish" hidden>
+    <p class="tag">WALK COMPLETE</p>
+    <h1>You have been round <em>the whole system</em> once.</h1>
+    <p id="score"></p>
+
+    <div id="map" class="map"></div>
+
+    <div class="method">
+      <b>The method the review uses — reusable on any surface you meet next:</b>
+      <ol>
+        <li><b>Name the attacker-controlled data.</b> Model output, request
+          bodies, filenames, archive bytes, stdout.</li>
+        <li><b>Find the component that acts on it</b>, and ask what
+          authority that component holds — host filesystem? provider
+          credentials? the score?</li>
+        <li><b>Keep the labels straight.</b> Some surfaces are
+          <i>observed</i> in the code, some <i>conditional</i> on
+          configuration, some only <i>possible</i> until someone tests them,
+          some <i>by design</i> — a grant the evaluator made on purpose — and
+          some already have an <i>existing control</i>. Never quietly promote
+          one to the next.</li>
+      </ol>
+    </div>
+
+    <p class="next">
+      Parts of the tree the walk skipped, and where to go next: the rest of
+      <code>_eval/</code> and the task runner (retries, epochs, sample
+      concurrency, what happens when a sample errors), the log recorders under
+      <code>log/_recorders/</code>, what samples sharing a host can do to each
+      other, and the sidecars that drive a browser or a desktop for the agent.
+      Each one answers to the same two questions you have been asking all the
+      way round: whose data is this, and what authority is acting on it?
+    </p>
+
+    <button id="restart" class="primary">↻ &nbsp;Walk it again</button>
+    <a href="../adversarial-agent-security-surface-review.md">Surface review →</a>
+    <a href="../adversarial-agent-attack-types.md">Attack types →</a>
+  </section>
+
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
